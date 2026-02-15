@@ -1,5 +1,5 @@
 import express from 'express';
-import { spawn } from 'child_process';
+import pty from 'node-pty';
 import fetch from 'node-fetch';
 
 const app = express();
@@ -121,43 +121,44 @@ app.post('/do', async (req, res) => {
     delete childEnv.CLAUDE_CODE_SSE_PORT;
     delete childEnv.CLAUDE_CODE_ENTRYPOINT;
 
-    // stream-json形式で出力するのでPTY不要。child_process.spawnで十分
-    const worker = spawn('/bin/zsh', ['./stealth-run.sh', folder, issueId], {
+    // PTY経由で起動（バッファリング防止のためTTYが必要）
+    const worker = pty.spawn('/bin/zsh', ['./stealth-run.sh', folder, issueId], {
+        name: 'xterm-256color',
+        cols: 200,
+        rows: 50,
         cwd: process.cwd(),
         env: {
             ...childEnv,
             CI: "true",
+            FORCE_COLOR: "1",
+            TERM: "xterm-256color"
         }
     });
 
     let output = '';
     let lineBuffer = '';
 
-    // stream-jsonのNDJSON(改行区切りJSON)をパース
-    worker.stdout.on('data', (chunk) => {
-        const text = chunk.toString();
-        output += text;
-        lineBuffer += text;
+    // PTYからのstream-json(NDJSON)をリアルタイムでパース
+    worker.onData((data) => {
+        output += data;
+        lineBuffer += data;
 
         const lines = lineBuffer.split('\n');
         lineBuffer = lines.pop(); // 未完成の行はバッファに残す
 
         for (const line of lines) {
-            if (!line.trim()) continue;
-            processStreamEvent(line);
+            // PTYのANSIエスケープシーケンスを除去してからパース
+            const cleaned = line.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/\r/g, '').trim();
+            if (!cleaned) continue;
+            processStreamEvent(cleaned);
         }
     });
 
-    worker.stderr.on('data', (chunk) => {
-        const text = chunk.toString();
-        output += text;
-        process.stderr.write(text);
-    });
-
-    worker.on('close', async (exitCode) => {
+    worker.onExit(async ({ exitCode }) => {
         // バッファに残った最後の行を処理
         if (lineBuffer.trim()) {
-            processStreamEvent(lineBuffer);
+            const cleaned = lineBuffer.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/\r/g, '').trim();
+            if (cleaned) processStreamEvent(cleaned);
         }
 
         if (exitCode !== 0 && output.trim() === '') {

@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "vitest",
-    "postinstall": "echo 'postinstall done'"
+    "postinstall": "chmod +x node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper 2>/dev/null || true"
   },
   "keywords": [],
   "author": "",
@@ -13,7 +13,8 @@
   "type": "module",
   "dependencies": {
     "express": "^5.2.1",
-    "node-fetch": "^3.3.2"
+    "node-fetch": "^3.3.2",
+    "node-pty": "^1.1.0"
   },
   "devDependencies": {
     "vitest": "^3.0.0"
