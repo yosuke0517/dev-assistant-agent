@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
-import { parseInput, processStreamEvent } from './server.js';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { parseInput, processStreamEvent, ProgressTracker } from './server.js';
 
 describe('parseInput', () => {
     it('スペース区切りでパースできる', () => {
@@ -167,5 +167,108 @@ describe('processStreamEvent', () => {
         expect(result.type).toBe('user');
         expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('❌'));
         consoleSpy.mockRestore();
+    });
+
+    it('trackerにアクティビティが記録される', () => {
+        const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+        const tracker = new ProgressTracker(null, 'TEST-1');
+
+        processStreamEvent(JSON.stringify({
+            type: 'assistant',
+            message: { content: [{ type: 'text', text: 'ファイルを確認します' }] }
+        }), tracker);
+
+        processStreamEvent(JSON.stringify({
+            type: 'assistant',
+            message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'ls' } }] }
+        }), tracker);
+
+        expect(tracker.activities).toHaveLength(2);
+        expect(tracker.activities[0]).toContain('ファイルを確認します');
+        expect(tracker.activities[1]).toContain('Bash');
+        consoleSpy.mockRestore();
+    });
+});
+
+describe('ProgressTracker', () => {
+    beforeEach(() => {
+        vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    it('responseUrlがない場合タイマーは開始しない', () => {
+        const tracker = new ProgressTracker(null, 'TEST-1');
+        tracker.start();
+        expect(tracker.timer).toBeNull();
+        tracker.stop();
+    });
+
+    it('アクティビティが蓄積される', () => {
+        const tracker = new ProgressTracker('https://hooks.slack.com/test', 'TEST-1');
+        tracker.addActivity('💬 テスト1');
+        tracker.addActivity('🔧 テスト2');
+        expect(tracker.activities).toHaveLength(2);
+        tracker.stop();
+    });
+
+    it('flushでアクティビティがリセットされる', async () => {
+        const mockFetch = vi.fn().mockResolvedValue({ ok: true });
+
+        const tracker = new ProgressTracker('https://hooks.slack.com/test', 'TEST-1', 60_000, mockFetch);
+        tracker.addActivity('💬 テスト');
+        await tracker._flush();
+
+        expect(tracker.activities).toHaveLength(0);
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+
+        // 送信内容を確認
+        const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+        expect(body.text).toContain('TEST-1');
+        expect(body.text).toContain('テスト');
+
+        tracker.stop();
+    });
+
+    it('アクティビティが空の場合flushしない', async () => {
+        const mockFetch = vi.fn().mockResolvedValue({ ok: true });
+
+        const tracker = new ProgressTracker('https://hooks.slack.com/test', 'TEST-1', 60_000, mockFetch);
+        await tracker._flush();
+
+        expect(mockFetch).not.toHaveBeenCalled();
+        tracker.stop();
+    });
+
+    it('最大10件に制限される', async () => {
+        const mockFetch = vi.fn().mockResolvedValue({ ok: true });
+
+        const tracker = new ProgressTracker('https://hooks.slack.com/test', 'TEST-1', 60_000, mockFetch);
+        for (let i = 0; i < 15; i++) {
+            tracker.addActivity(`アクティビティ ${i}`);
+        }
+        await tracker._flush();
+
+        const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+        // 直近10件のみ（5〜14）
+        expect(body.text).toContain('アクティビティ 5');
+        expect(body.text).toContain('アクティビティ 14');
+        expect(body.text).not.toContain('アクティビティ 4');
+
+        tracker.stop();
+    });
+
+    it('fetch失敗でもクラッシュしない', async () => {
+        const mockFetch = vi.fn().mockRejectedValue(new Error('network error'));
+        const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+        const tracker = new ProgressTracker('https://hooks.slack.com/test', 'TEST-1', 60_000, mockFetch);
+        tracker.addActivity('テスト');
+        await expect(tracker._flush()).resolves.toBeUndefined();
+
+        consoleSpy.mockRestore();
+        tracker.stop();
     });
 });
