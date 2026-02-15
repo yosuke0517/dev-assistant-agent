@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
-import { app, parseInput, notifySlack } from './server.js';
+import { describe, it, expect, vi } from 'vitest';
+import { parseInput, processStreamEvent } from './server.js';
 
 describe('parseInput', () => {
     it('スペース区切りでパースできる', () => {
@@ -55,93 +55,117 @@ describe('parseInput', () => {
     });
 });
 
-describe('POST /do エンドポイント', () => {
-    let server;
-    const TEST_PORT = 3001;
-
-    beforeAll(() => {
-        return new Promise((resolve) => {
-            server = app.listen(TEST_PORT, () => {
-                resolve();
-            });
+describe('processStreamEvent', () => {
+    it('systemイベントをパースできる', () => {
+        const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+        const line = JSON.stringify({
+            type: 'system',
+            subtype: 'init',
+            session_id: 'test-session',
+            tools: ['Bash', 'Read', 'Edit']
         });
+
+        const result = processStreamEvent(line);
+
+        expect(result.type).toBe('system');
+        expect(result.session_id).toBe('test-session');
+        expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('セッション開始'));
+        consoleSpy.mockRestore();
     });
 
-    afterAll(() => {
-        return new Promise((resolve) => {
-            server.close(() => {
-                resolve();
-            });
-        });
-    });
-
-    it('text なしで 400 を返す', async () => {
-        const response = await fetch(`http://localhost:${TEST_PORT}/do`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({})
-        });
-
-        expect(response.status).toBe(400);
-        const text = await response.text();
-        expect(text).toContain('指示（フォルダ名と課題キー）を入力してください');
-    });
-
-    it('課題キーなしで 400 を返す', async () => {
-        const response = await fetch(`http://localhost:${TEST_PORT}/do`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: 'circus_backend' })
-        });
-
-        expect(response.status).toBe(400);
-        const text = await response.text();
-        expect(text).toContain('課題キー（例: PROJ-123）が不足しています');
-    });
-
-    it('正常入力で 200 とレスポンス文言を返す', async () => {
-        const response = await fetch(`http://localhost:${TEST_PORT}/do`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: 'circus_backend PROJ-123' })
-        });
-
-        expect(response.status).toBe(200);
-        const text = await response.text();
-        expect(text).toContain('circus_backend');
-        expect(text).toContain('課題 PROJ-123 の対応を開始しました');
-    });
-});
-
-describe('notifySlack', () => {
-    it('正常系: fetch が呼ばれる', async () => {
-        const mockFetch = vi.fn().mockResolvedValue({
-            ok: true,
-            status: 200
-        });
-        vi.stubGlobal('fetch', mockFetch);
-
-        await notifySlack('https://hooks.slack.com/test', 'テストメッセージ');
-
-        expect(mockFetch).toHaveBeenCalledWith(
-            'https://hooks.slack.com/test',
-            {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text: 'テストメッセージ' })
+    it('assistantのテキストイベントをパースできる', () => {
+        const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+        const line = JSON.stringify({
+            type: 'assistant',
+            message: {
+                content: [{ type: 'text', text: 'コードを分析します' }]
             }
-        );
+        });
 
-        vi.unstubAllGlobals();
+        const result = processStreamEvent(line);
+
+        expect(result.type).toBe('assistant');
+        expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('コードを分析します'));
+        consoleSpy.mockRestore();
     });
 
-    it('異常系: fetch が失敗してもクラッシュしない', async () => {
-        const mockFetch = vi.fn().mockRejectedValue(new Error('ネットワークエラー'));
-        vi.stubGlobal('fetch', mockFetch);
+    it('assistantのツール使用イベントをパースできる', () => {
+        const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+        const line = JSON.stringify({
+            type: 'assistant',
+            message: {
+                content: [{
+                    type: 'tool_use',
+                    name: 'Bash',
+                    input: { command: 'npm test' }
+                }]
+            }
+        });
 
-        // エラーがスローされないことを確認
-        await expect(notifySlack('https://hooks.slack.com/test', 'テストメッセージ')).resolves.toBeUndefined();
+        const result = processStreamEvent(line);
 
-        vi.unstubAllGlobals();
+        expect(result.type).toBe('assistant');
+        expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Bash'));
+        expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('npm test'));
+        consoleSpy.mockRestore();
+    });
+
+    it('resultイベントをパースできる', () => {
+        const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+        const line = JSON.stringify({
+            type: 'result',
+            subtype: 'success',
+            cost_usd: 0.0542,
+            num_turns: 3,
+            duration_ms: 12345,
+            result: 'PRを作成しました'
+        });
+
+        const result = processStreamEvent(line);
+
+        expect(result.type).toBe('result');
+        expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('$0.0542'));
+        consoleSpy.mockRestore();
+    });
+
+    it('JSON以外の行はそのまま出力する', () => {
+        const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+        const line = 'Claude Code starting for Backlog Issue: RA_DEV-81...';
+
+        const result = processStreamEvent(line);
+
+        expect(result.type).toBe('raw');
+        expect(consoleSpy).toHaveBeenCalledWith(line);
+        consoleSpy.mockRestore();
+    });
+
+    it('空行は無視する', () => {
+        const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+        const result = processStreamEvent('   ');
+
+        expect(result.type).toBe('raw');
+        expect(consoleSpy).not.toHaveBeenCalled();
+        consoleSpy.mockRestore();
+    });
+
+    it('ツール結果のエラーを正しく表示する', () => {
+        const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+        const line = JSON.stringify({
+            type: 'user',
+            message: {
+                content: [{
+                    type: 'tool_result',
+                    tool_use_id: 'toolu_123',
+                    content: 'Error: file not found',
+                    is_error: true
+                }]
+            }
+        });
+
+        const result = processStreamEvent(line);
+
+        expect(result.type).toBe('user');
+        expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('❌'));
+        consoleSpy.mockRestore();
     });
 });

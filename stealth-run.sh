@@ -34,6 +34,5 @@ echo "Claude Code starting for Backlog Issue: $ISSUE_ID..."
 
 # --verbose を追加
 # -y を追加して、ツール実行の確認をすべてスキップさせる
-#claude --dangerously-skip-permissions --verbose -p "Backlog MCPを使用して、課題 $ISSUE_ID の内容を確認してください。その内容に基づいてコードを実装し、テストをパスさせ（UIのみのタスクについては不要）、プルリクエストを作成してください。デザインが必要な場合はfigma desktop mcpを使用してデータを読み取ってください。完了したらPRのURLを教えてください。【重要】絶対に main ブランチへ直接 push しないでください。"
-claude --dangerously-skip-permissions --verbose -p "Backlog MCPを使用して、課題 $ISSUE_ID の内容を確認してください。その内容に基づいてコードを実装し、テストをパスさせ（UIのみのタスクについては不要）、プルリクエストを作成してください。デザインが必要な場合はfigma desktop mcpを使用してデータを読み取ってください。完了したらPRのURLを教えてください。【重要】絶対に main ブランチへ直接 push しないでください。"
+claude --dangerously-skip-permissions --verbose --model claude-opus-4-6 --output-format stream-json -p "Backlog MCPを使用して、課題 $ISSUE_ID の内容を確認してください。その内容に基づいてコードを実装し、テストをパスさせ（UIのみのタスクについては不要）、プルリクエストを作成してください。デザインが必要な場合はfigma desktop mcpを使用してデータを読み取ってください。完了したらPRのURLを教えてください。【重要】絶対に main ブランチへ直接 push しないでください。"
 echo "Task completed at $(date)"
