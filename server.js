@@ -22,7 +22,7 @@ function timestamp() {
 /**
  * stream-json形式のイベントをパースしてログ出力する
  */
-export function processStreamEvent(line) {
+export function processStreamEvent(line, tracker = null) {
     let event;
     try {
         event = JSON.parse(line);
@@ -38,16 +38,20 @@ export function processStreamEvent(line) {
             if (event.tools) {
                 console.log(`  利用可能ツール: ${event.tools.join(', ')}`);
             }
+            tracker?.addActivity('📡 セッション開始');
             break;
 
         case 'assistant': {
             const blocks = event.message?.content || [];
             for (const block of blocks) {
                 if (block.type === 'text' && block.text) {
-                    console.log(`${timestamp()} 💬 Claude: ${block.text.substring(0, 300)}${block.text.length > 300 ? '...' : ''}`);
+                    const preview = block.text.substring(0, 300) + (block.text.length > 300 ? '...' : '');
+                    console.log(`${timestamp()} 💬 Claude: ${preview}`);
+                    tracker?.addActivity(`💬 ${block.text.substring(0, 100)}${block.text.length > 100 ? '...' : ''}`);
                 } else if (block.type === 'tool_use') {
                     const inputSummary = summarizeToolInput(block.name, block.input);
                     console.log(`${timestamp()} 🔧 ツール実行: ${block.name} ${inputSummary}`);
+                    tracker?.addActivity(`🔧 ${block.name} ${inputSummary}`.substring(0, 120));
                 }
             }
             break;
@@ -61,6 +65,7 @@ export function processStreamEvent(line) {
                     const preview = content?.substring(0, 200) || '';
                     const isError = block.is_error;
                     console.log(`${timestamp()} ${isError ? '❌' : '📋'} ツール結果: ${preview}${content?.length > 200 ? '...' : ''}`);
+                    if (isError) tracker?.addActivity(`❌ エラー: ${content?.substring(0, 80)}`);
                 }
             }
             break;
@@ -74,11 +79,63 @@ export function processStreamEvent(line) {
             break;
 
         default:
-            // stream_event等はスキップ（ノイズ低減）
             break;
     }
 
     return event;
+}
+
+/**
+ * Slack進捗通知用のトラッカー
+ * processStreamEventから呼ばれ、直近のアクティビティを蓄積する
+ * 1分ごとのタイマーでSlackに送信し、バッファをリセット
+ */
+export class ProgressTracker {
+    constructor(responseUrl, issueId, intervalMs = 60_000, fetchFn = fetch) {
+        this.responseUrl = responseUrl;
+        this.issueId = issueId;
+        this.intervalMs = intervalMs;
+        this.activities = [];
+        this.timer = null;
+        this._fetch = fetchFn;
+    }
+
+    start() {
+        if (!this.responseUrl) return;
+        this.timer = setInterval(() => this._flush(), this.intervalMs);
+    }
+
+    stop() {
+        if (this.timer) {
+            clearInterval(this.timer);
+            this.timer = null;
+        }
+    }
+
+    /** イベントから進捗メッセージを追加 */
+    addActivity(message) {
+        this.activities.push(message);
+    }
+
+    async _flush() {
+        if (!this.responseUrl || this.activities.length === 0) return;
+
+        // 直近のアクティビティをまとめて送信（最大10件）
+        const recent = this.activities.slice(-10);
+        this.activities = [];
+
+        const text = `⏳ *${this.issueId}* 進捗レポート\n${recent.map(a => `• ${a}`).join('\n')}`;
+
+        try {
+            await this._fetch(this.responseUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text, replace_original: false })
+            });
+        } catch (err) {
+            console.error('進捗通知の送信に失敗:', err.message);
+        }
+    }
 }
 
 function summarizeToolInput(toolName, input) {
@@ -115,6 +172,10 @@ app.post('/do', async (req, res) => {
 
     console.log(`\n${timestamp()} 🚀 実行開始: ${folder}, ID: ${issueId}`);
 
+    // Slack進捗通知トラッカー（1分ごとに進捗をSlackへ送信）
+    const tracker = new ProgressTracker(responseUrl, issueId);
+    tracker.start();
+
     // Claude Code内から起動された場合のネスト検出を回避
     const childEnv = { ...process.env };
     delete childEnv.CLAUDECODE;
@@ -150,15 +211,18 @@ app.post('/do', async (req, res) => {
             // PTYのANSIエスケープシーケンスを除去してからパース
             const cleaned = line.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/\r/g, '').trim();
             if (!cleaned) continue;
-            processStreamEvent(cleaned);
+            processStreamEvent(cleaned, tracker);
         }
     });
 
     worker.onExit(async ({ exitCode }) => {
+        // タイマー停止 & 残りのアクティビティをフラッシュ
+        tracker.stop();
+
         // バッファに残った最後の行を処理
         if (lineBuffer.trim()) {
             const cleaned = lineBuffer.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/\r/g, '').trim();
-            if (cleaned) processStreamEvent(cleaned);
+            if (cleaned) processStreamEvent(cleaned, tracker);
         }
 
         if (exitCode !== 0 && output.trim() === '') {
