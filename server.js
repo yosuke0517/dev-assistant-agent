@@ -1,6 +1,6 @@
 import express from 'express';
 import pty from 'node-pty';
-import fetch from 'node-fetch'; 
+import fetch from 'node-fetch';
 
 const app = express();
 app.use(express.urlencoded({ extended: true }));
@@ -15,22 +15,105 @@ export function parseInput(rawText) {
     return { folder: parts[0], issueId: parts[1] };
 }
 
+function timestamp() {
+    return `[${new Date().toLocaleString()}]`;
+}
+
+/**
+ * stream-json形式のイベントをパースしてログ出力する
+ */
+export function processStreamEvent(line) {
+    let event;
+    try {
+        event = JSON.parse(line);
+    } catch {
+        // stealth-run.shのechoなどJSON以外の行はそのまま出力
+        if (line.trim()) console.log(line);
+        return { type: 'raw', text: line };
+    }
+
+    switch (event.type) {
+        case 'system':
+            console.log(`${timestamp()} 📡 セッション開始 (session: ${event.session_id})`);
+            if (event.tools) {
+                console.log(`  利用可能ツール: ${event.tools.join(', ')}`);
+            }
+            break;
+
+        case 'assistant': {
+            const blocks = event.message?.content || [];
+            for (const block of blocks) {
+                if (block.type === 'text' && block.text) {
+                    console.log(`${timestamp()} 💬 Claude: ${block.text.substring(0, 300)}${block.text.length > 300 ? '...' : ''}`);
+                } else if (block.type === 'tool_use') {
+                    const inputSummary = summarizeToolInput(block.name, block.input);
+                    console.log(`${timestamp()} 🔧 ツール実行: ${block.name} ${inputSummary}`);
+                }
+            }
+            break;
+        }
+
+        case 'user': {
+            const results = event.message?.content || [];
+            for (const block of results) {
+                if (block.type === 'tool_result') {
+                    const content = typeof block.content === 'string' ? block.content : JSON.stringify(block.content);
+                    const preview = content?.substring(0, 200) || '';
+                    const isError = block.is_error;
+                    console.log(`${timestamp()} ${isError ? '❌' : '📋'} ツール結果: ${preview}${content?.length > 200 ? '...' : ''}`);
+                }
+            }
+            break;
+        }
+
+        case 'result':
+            console.log(`${timestamp()} ✅ 完了 (コスト: $${event.cost_usd?.toFixed(4) || '?'}, ターン数: ${event.num_turns || '?'}, 所要時間: ${((event.duration_ms || 0) / 1000).toFixed(1)}s)`);
+            if (event.result) {
+                console.log(`${timestamp()} 📝 最終結果: ${event.result.substring(0, 500)}${event.result.length > 500 ? '...' : ''}`);
+            }
+            break;
+
+        default:
+            // stream_event等はスキップ（ノイズ低減）
+            break;
+    }
+
+    return event;
+}
+
+function summarizeToolInput(toolName, input) {
+    if (!input) return '';
+    switch (toolName) {
+        case 'Bash':
+            return `> ${input.command || ''}`.substring(0, 150);
+        case 'Read':
+            return `📄 ${input.file_path || ''}`;
+        case 'Edit':
+            return `✏️ ${input.file_path || ''}`;
+        case 'Write':
+            return `📝 ${input.file_path || ''}`;
+        case 'Glob':
+            return `🔍 ${input.pattern || ''}`;
+        case 'Grep':
+            return `🔎 "${input.pattern || ''}" in ${input.path || '.'}`;
+        case 'Task':
+            return `🤖 ${input.description || ''}`;
+        default:
+            return JSON.stringify(input).substring(0, 100);
+    }
+}
+
 app.post('/do', async (req, res) => {
     const { folder, issueId } = parseInput(req.body.text || "");
-    const responseUrl = req.body.response_url; // Slackからの返信先URL
+    const responseUrl = req.body.response_url;
 
     if (!folder || !issueId) {
         return res.status(400).send('引数不足。例: circus_agent_ecosystem RA_DEV-81');
     }
 
-    // 1. Slackに受付完了を即レス（3秒ルール回避）
     res.send(`了解。${folder} にて ${issueId} の対応を開始しました。MBPのターミナルで進捗を確認してください。`);
 
-    console.log(`\n[${new Date().toLocaleString()}] 🚀 実行開始: ${folder}, ID: ${issueId}`);
-
-    // 2. Claudeプロセスを起動（node-ptyで疑似端末を提供）
-    // PTYを使うことでClaude CLIがTTY環境を認識し、詳細ログを出力します
-    // スクリプトを実行するためにzshの絶対パスを指定
+    console.log(`\n${timestamp()} 🚀 実行開始: ${folder}, ID: ${issueId}`);
 
     // Claude Code内から起動された場合のネスト検出を回避
     const childEnv = { ...process.env };
@@ -38,6 +121,7 @@ app.post('/do', async (req, res) => {
     delete childEnv.CLAUDE_CODE_SSE_PORT;
     delete childEnv.CLAUDE_CODE_ENTRYPOINT;
 
+    // PTY経由で起動（バッファリング防止のためTTYが必要）
     const worker = pty.spawn('/bin/zsh', ['./stealth-run.sh', folder, issueId], {
         name: 'xterm-256color',
         cols: 200,
@@ -45,33 +129,45 @@ app.post('/do', async (req, res) => {
         cwd: process.cwd(),
         env: {
             ...childEnv,
-            CI: "true",      // 💡 これを追加！アップデート確認などをスキップさせます
+            CI: "true",
             FORCE_COLOR: "1",
             TERM: "xterm-256color"
         }
     });
 
     let output = '';
+    let lineBuffer = '';
 
-    // 【重要】PTYからの出力をリアルタイムで表示
-    // node-ptyはstdout/stderrを統合したストリームを提供します
-    // これで「許可待ち」や「思考プロセス」がブラックボックスにならずに済みます
+    // PTYからのstream-json(NDJSON)をリアルタイムでパース
     worker.onData((data) => {
         output += data;
-        process.stdout.write(data);
+        lineBuffer += data;
+
+        const lines = lineBuffer.split('\n');
+        lineBuffer = lines.pop(); // 未完成の行はバッファに残す
+
+        for (const line of lines) {
+            // PTYのANSIエスケープシーケンスを除去してからパース
+            const cleaned = line.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/\r/g, '').trim();
+            if (!cleaned) continue;
+            processStreamEvent(cleaned);
+        }
     });
 
-    // 3. 処理完了後の処理
     worker.onExit(async ({ exitCode }) => {
+        // バッファに残った最後の行を処理
+        if (lineBuffer.trim()) {
+            const cleaned = lineBuffer.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/\r/g, '').trim();
+            if (cleaned) processStreamEvent(cleaned);
+        }
+
         if (exitCode !== 0 && output.trim() === '') {
             console.error(`⚠️ プロセスが出力なしで異常終了 (Exit Code: ${exitCode})。環境変数を確認してください。`);
         }
-        console.log(`\n[${new Date().toLocaleString()}] ✅ 実行完了 (Exit Code: ${exitCode})`);
+        console.log(`\n${timestamp()} ✅ 実行完了 (Exit Code: ${exitCode})`);
 
-        // 前回のミス（data.toString()の参照）を削除し、安全に完了通知を送ります
         if (responseUrl) {
-            // ログ全体からプルリクエストのURLを探す
-            const prUrlMatch = output.match(/https:\/\/github\.com\/[^\s]+\/pull\/\d+/);
+            const prUrlMatch = output.match(/https:\/\/github\.com\/[^\s"]+\/pull\/\d+/);
             const prMessage = prUrlMatch
                 ? `\nPRが作成されました: ${prUrlMatch[0]}`
                 : "\nPRの作成を確認できませんでした。詳細はターミナルのログを確認してください。";
