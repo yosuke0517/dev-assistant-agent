@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { parseInput, processStreamEvent, ProgressTracker, postToSlack } from './server.js';
+import { parseInput, processStreamEvent, ProgressTracker, postToSlack, waitForSlackReply, InteractiveHandler, extractErrorSummary } from './server.js';
 
 describe('parseInput', () => {
     it('スペース区切りでパースできる', () => {
@@ -366,5 +366,359 @@ describe('postToSlack', () => {
 
         consoleSpy.mockRestore();
         process.env.SLACK_BOT_TOKEN = originalToken;
+    });
+});
+
+describe('waitForSlackReply', () => {
+    it('SLACK_BOT_TOKEN未設定の場合はnullを返す', async () => {
+        const originalToken = process.env.SLACK_BOT_TOKEN;
+        delete process.env.SLACK_BOT_TOKEN;
+        const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+        const result = await waitForSlackReply('C123456', '1234.5678', '1234.5679');
+
+        expect(result).toBeNull();
+        expect(consoleSpy).toHaveBeenCalledWith('SLACK_BOT_TOKEN 未設定');
+
+        consoleSpy.mockRestore();
+        process.env.SLACK_BOT_TOKEN = originalToken;
+    });
+
+    it('ユーザー返信が見つかったら即座に返す', async () => {
+        const originalToken = process.env.SLACK_BOT_TOKEN;
+        process.env.SLACK_BOT_TOKEN = 'xoxb-test-token';
+
+        const mockFetch = vi.fn().mockResolvedValue({
+            json: vi.fn().mockResolvedValue({
+                ok: true,
+                messages: [
+                    { ts: '1234.5678', text: 'bot message', bot_id: 'B123' },
+                    { ts: '1234.5680', text: 'retry', user: 'U123' },
+                ]
+            })
+        });
+
+        const result = await waitForSlackReply('C123456', '1234.5678', '1234.5679', {
+            fetchFn: mockFetch,
+            intervalMs: 10,
+            timeoutMs: 1000,
+        });
+
+        expect(result).toEqual({ text: 'retry', user: 'U123' });
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+
+        process.env.SLACK_BOT_TOKEN = originalToken;
+    });
+
+    it('botメッセージは無視される', async () => {
+        const originalToken = process.env.SLACK_BOT_TOKEN;
+        process.env.SLACK_BOT_TOKEN = 'xoxb-test-token';
+
+        let callCount = 0;
+        const mockFetch = vi.fn().mockImplementation(() => {
+            callCount++;
+            if (callCount <= 2) {
+                return Promise.resolve({
+                    json: () => Promise.resolve({
+                        ok: true,
+                        messages: [
+                            { ts: '1234.5680', text: 'bot reply', bot_id: 'B123' },
+                        ]
+                    })
+                });
+            }
+            return Promise.resolve({
+                json: () => Promise.resolve({
+                    ok: true,
+                    messages: [
+                        { ts: '1234.5680', text: 'bot reply', bot_id: 'B123' },
+                        { ts: '1234.5681', text: 'user reply', user: 'U456' },
+                    ]
+                })
+            });
+        });
+
+        const result = await waitForSlackReply('C123456', '1234.5678', '1234.5679', {
+            fetchFn: mockFetch,
+            intervalMs: 10,
+            timeoutMs: 5000,
+        });
+
+        expect(result).toEqual({ text: 'user reply', user: 'U456' });
+        expect(callCount).toBeGreaterThanOrEqual(3);
+
+        process.env.SLACK_BOT_TOKEN = originalToken;
+    });
+
+    it('タイムアウト時はnullを返す', async () => {
+        const originalToken = process.env.SLACK_BOT_TOKEN;
+        process.env.SLACK_BOT_TOKEN = 'xoxb-test-token';
+        const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+        const mockFetch = vi.fn().mockResolvedValue({
+            json: vi.fn().mockResolvedValue({
+                ok: true,
+                messages: []
+            })
+        });
+
+        const result = await waitForSlackReply('C123456', '1234.5678', '1234.5679', {
+            fetchFn: mockFetch,
+            intervalMs: 10,
+            timeoutMs: 50,
+        });
+
+        expect(result).toBeNull();
+        expect(consoleSpy).toHaveBeenCalledWith('Slack返信待ちタイムアウト');
+
+        consoleSpy.mockRestore();
+        process.env.SLACK_BOT_TOKEN = originalToken;
+    });
+
+    it('API呼び出しエラーでもクラッシュせずポーリングを継続する', async () => {
+        const originalToken = process.env.SLACK_BOT_TOKEN;
+        process.env.SLACK_BOT_TOKEN = 'xoxb-test-token';
+        const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+        let callCount = 0;
+        const mockFetch = vi.fn().mockImplementation(() => {
+            callCount++;
+            if (callCount === 1) {
+                return Promise.reject(new Error('Network error'));
+            }
+            return Promise.resolve({
+                json: () => Promise.resolve({
+                    ok: true,
+                    messages: [
+                        { ts: '1234.5680', text: 'retry', user: 'U123' },
+                    ]
+                })
+            });
+        });
+
+        const result = await waitForSlackReply('C123456', '1234.5678', '1234.5679', {
+            fetchFn: mockFetch,
+            intervalMs: 10,
+            timeoutMs: 5000,
+        });
+
+        expect(result).toEqual({ text: 'retry', user: 'U123' });
+        expect(consoleSpy).toHaveBeenCalledWith('Slack返信取得エラー:', 'Network error');
+
+        consoleSpy.mockRestore();
+        logSpy.mockRestore();
+        process.env.SLACK_BOT_TOKEN = originalToken;
+    });
+});
+
+describe('InteractiveHandler', () => {
+    it('channel未設定の場合はabortを返す', async () => {
+        const handler = new InteractiveHandler(null, null);
+        const result = await handler.askUser('test error');
+        expect(result).toEqual({ action: 'abort', message: 'Slackチャンネル/スレッド未設定' });
+    });
+
+    it('threadTs未設定の場合はabortを返す', async () => {
+        const handler = new InteractiveHandler('C123456', null);
+        const result = await handler.askUser('test error');
+        expect(result).toEqual({ action: 'abort', message: 'Slackチャンネル/スレッド未設定' });
+    });
+
+    it('Slack送信失敗の場合はabortを返す', async () => {
+        const mockPost = vi.fn().mockResolvedValue(null);
+        const handler = new InteractiveHandler('C123456', '1234.5678', { postFn: mockPost });
+        const result = await handler.askUser('test error');
+        expect(result).toEqual({ action: 'abort', message: 'Slack送信失敗' });
+    });
+
+    it('ユーザーがretryと返信した場合はretryを返す', async () => {
+        const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+        const mockPost = vi.fn().mockResolvedValue('1234.5680');
+        const mockWaitReply = vi.fn().mockResolvedValue({ text: 'retry', user: 'U123' });
+
+        const handler = new InteractiveHandler('C123456', '1234.5678', {
+            postFn: mockPost,
+            waitReplyFn: mockWaitReply,
+        });
+
+        const result = await handler.askUser('MCP connection error');
+
+        expect(result).toEqual({ action: 'retry', message: 'retry' });
+        expect(mockPost).toHaveBeenCalledTimes(1);
+        expect(mockPost.mock.calls[0][0]).toBe('C123456');
+        expect(mockPost.mock.calls[0][1]).toContain('エラーが発生しました');
+        expect(mockPost.mock.calls[0][1]).toContain('MCP connection error');
+        expect(mockWaitReply).toHaveBeenCalledTimes(1);
+
+        consoleSpy.mockRestore();
+    });
+
+    it('ユーザーが再実行と返信した場合はretryを返す', async () => {
+        const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+        const mockPost = vi.fn().mockResolvedValue('1234.5680');
+        const mockWaitReply = vi.fn().mockResolvedValue({ text: '再実行', user: 'U123' });
+
+        const handler = new InteractiveHandler('C123456', '1234.5678', {
+            postFn: mockPost,
+            waitReplyFn: mockWaitReply,
+        });
+
+        const result = await handler.askUser('error');
+        expect(result).toEqual({ action: 'retry', message: '再実行' });
+
+        consoleSpy.mockRestore();
+    });
+
+    it('ユーザーがabortと返信した場合はabortを返す', async () => {
+        const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+        const mockPost = vi.fn().mockResolvedValue('1234.5680');
+        const mockWaitReply = vi.fn().mockResolvedValue({ text: 'abort', user: 'U123' });
+
+        const handler = new InteractiveHandler('C123456', '1234.5678', {
+            postFn: mockPost,
+            waitReplyFn: mockWaitReply,
+        });
+
+        const result = await handler.askUser('error');
+        expect(result).toEqual({ action: 'abort', message: 'abort' });
+
+        consoleSpy.mockRestore();
+    });
+
+    it('ユーザーが中断と返信した場合はabortを返す', async () => {
+        const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+        const mockPost = vi.fn().mockResolvedValue('1234.5680');
+        const mockWaitReply = vi.fn().mockResolvedValue({ text: '中断', user: 'U123' });
+
+        const handler = new InteractiveHandler('C123456', '1234.5678', {
+            postFn: mockPost,
+            waitReplyFn: mockWaitReply,
+        });
+
+        const result = await handler.askUser('error');
+        expect(result).toEqual({ action: 'abort', message: '中断' });
+
+        consoleSpy.mockRestore();
+    });
+
+    it('ユーザーがカスタムメッセージを返信した場合はretryとメッセージを返す', async () => {
+        const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+        const mockPost = vi.fn().mockResolvedValue('1234.5680');
+        const mockWaitReply = vi.fn().mockResolvedValue({ text: 'MCPの代わりにAPIを直接使って', user: 'U123' });
+
+        const handler = new InteractiveHandler('C123456', '1234.5678', {
+            postFn: mockPost,
+            waitReplyFn: mockWaitReply,
+        });
+
+        const result = await handler.askUser('MCP error');
+        expect(result).toEqual({ action: 'retry', message: 'MCPの代わりにAPIを直接使って' });
+
+        consoleSpy.mockRestore();
+    });
+
+    it('タイムアウト時はabortを返す', async () => {
+        const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+        const mockPost = vi.fn().mockResolvedValue('1234.5680');
+        const mockWaitReply = vi.fn().mockResolvedValue(null);
+
+        const handler = new InteractiveHandler('C123456', '1234.5678', {
+            postFn: mockPost,
+            waitReplyFn: mockWaitReply,
+        });
+
+        const result = await handler.askUser('error');
+        expect(result).toEqual({ action: 'abort', message: 'タイムアウト（返信なし）' });
+
+        consoleSpy.mockRestore();
+    });
+
+    it('エラーサマリーが500文字を超える場合は切り詰められる', async () => {
+        const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+        const mockPost = vi.fn().mockResolvedValue('1234.5680');
+        const mockWaitReply = vi.fn().mockResolvedValue({ text: 'retry', user: 'U123' });
+
+        const handler = new InteractiveHandler('C123456', '1234.5678', {
+            postFn: mockPost,
+            waitReplyFn: mockWaitReply,
+        });
+
+        const longError = 'A'.repeat(600);
+        await handler.askUser(longError);
+
+        const sentText = mockPost.mock.calls[0][1];
+        // エラーサマリー部分が500文字に切り詰められていることを確認
+        expect(sentText).not.toContain('A'.repeat(600));
+        expect(sentText).toContain('A'.repeat(500));
+
+        consoleSpy.mockRestore();
+    });
+});
+
+describe('extractErrorSummary', () => {
+    it('ツール結果のエラーを抽出する', () => {
+        const output = [
+            JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'working' }] } }),
+            JSON.stringify({
+                type: 'user',
+                message: {
+                    content: [{
+                        type: 'tool_result',
+                        content: 'MCP connection refused',
+                        is_error: true
+                    }]
+                }
+            }),
+        ].join('\n');
+
+        const summary = extractErrorSummary(output);
+        expect(summary).toContain('MCP connection refused');
+    });
+
+    it('resultイベントのエラーを抽出する', () => {
+        const output = JSON.stringify({
+            type: 'result',
+            subtype: 'error_max_turns',
+            result: 'Maximum turns exceeded'
+        });
+
+        const summary = extractErrorSummary(output);
+        expect(summary).toContain('最大ターン数に到達しました');
+    });
+
+    it('非JSONエラー行を抽出する', () => {
+        const output = 'some normal line\nError: Directory /foo does not exist.\nanother line';
+
+        const summary = extractErrorSummary(output);
+        expect(summary).toContain('Error: Directory /foo does not exist.');
+    });
+
+    it('エラーが見つからない場合はデフォルトメッセージを返す', () => {
+        const output = 'normal line 1\nnormal line 2';
+
+        const summary = extractErrorSummary(output);
+        expect(summary).toContain('原因不明のエラーで終了しました');
+    });
+
+    it('最大5件のエラーに制限される', () => {
+        const errors = [];
+        for (let i = 0; i < 8; i++) {
+            errors.push(`Error: problem ${i}`);
+        }
+        const output = errors.join('\n');
+
+        const summary = extractErrorSummary(output);
+        // 最後の5件のみ（3〜7）
+        expect(summary).toContain('Error: problem 3');
+        expect(summary).toContain('Error: problem 7');
+        expect(summary).not.toContain('Error: problem 2');
+    });
+
+    it('ANSIエスケープシーケンスを除去してからパースする', () => {
+        const output = '\x1b[31mError: something went wrong\x1b[0m';
+
+        const summary = extractErrorSummary(output);
+        expect(summary).toContain('Error: something went wrong');
     });
 });

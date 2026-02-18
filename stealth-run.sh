@@ -12,6 +12,7 @@ fi
 # 引数の受け取り
 FOLDER_NAME=$1  # 例: circus_backend または agent
 ISSUE_ID=$2    # 例: PROJ-123 または GitHub Issue番号
+EXTRA_PROMPT=$3 # オプション: ユーザーからの追加指示（リトライ時に使用）
 
 # 環境変数チェック
 if [ -z "$WORKSPACE_ROOT" ] || [ -z "$AGENT_PROJECT_PATH" ]; then
@@ -91,6 +92,14 @@ STEP2: 課題内容に基づいてコードを実装し、テストをパスさ�
 STEP3: すべての作業が完了したら、実施内容を報告してください。PRは作成不要です。
 
 【重要】絶対に ${BASE_BRANCH} ブランチへ直接 push しないでください。"
+fi
+
+# ユーザーからの追加指示がある場合はプロンプトに付与
+if [ -n "$EXTRA_PROMPT" ]; then
+    PROMPT="${PROMPT}
+
+【ユーザーからの追加指示】
+${EXTRA_PROMPT}"
 fi
 
 claude --dangerously-skip-permissions \
