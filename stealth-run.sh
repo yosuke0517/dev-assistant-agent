@@ -1,6 +1,14 @@
 #!/bin/bash
 set -e
 
+# .env読み込み
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "$SCRIPT_DIR/.env" ]; then
+    set -a
+    source "$SCRIPT_DIR/.env"
+    set +a
+fi
+
 # 引数の受け取り
 FOLDER_NAME=$1  # 例: circus_backend
 ISSUE_ID=$2    # 例: PROJ-123
@@ -19,14 +27,29 @@ else
     exit 1
 fi
 
-# 2. Git最新化
-git checkout main
-git pull origin main
+# 2. ベースブランチを自動検出してGit最新化
+BASE_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')
+if [ -z "$BASE_BRANCH" ]; then
+    if git show-ref --verify --quiet refs/heads/main; then
+        BASE_BRANCH="main"
+    elif git show-ref --verify --quiet refs/heads/master; then
+        BASE_BRANCH="master"
+    else
+        echo "Error: Could not detect base branch."
+        exit 1
+    fi
+fi
+echo "Base branch: $BASE_BRANCH"
+git checkout "$BASE_BRANCH"
+git pull origin "$BASE_BRANCH"
 
-# 3. ステルス設定 (Yosuke Takeuchiさん本人のコミットとして記録)
-git config user.name yosuke0517
-# 受託開発用のメールアドレスに適宜書き換えてください
-git config user.email "yosuke.takeuchi@gmail.com" 
+# 3. ステルス設定 (環境変数から読み取り)
+if [ -z "$GIT_USER_NAME" ] || [ -z "$GIT_USER_EMAIL" ]; then
+    echo "Error: GIT_USER_NAME and GIT_USER_EMAIL must be set in .env"
+    exit 1
+fi
+git config user.name "$GIT_USER_NAME"
+git config user.email "$GIT_USER_EMAIL"
 
 # 4. エージェントによる実装実行
 # Backlog MCPを使用して課題内容を読み取るよう明示
@@ -34,5 +57,23 @@ echo "Claude Code starting for Backlog Issue: $ISSUE_ID..."
 
 # --verbose を追加
 # -y を追加して、ツール実行の確認をすべてスキップさせる
-claude --dangerously-skip-permissions --verbose --model claude-opus-4-6 --output-format stream-json -p "Backlog MCPを使用して、課題 $ISSUE_ID の内容を確認してください。その内容に基づいてコードを実装し、テストをパスさせ（UIのみのタスクについては不要）、プルリクエストを作成してください。デザインが必要な場合はfigma desktop mcpを使用してデータを読み取ってください。完了したらPRのURLを教えてください。【重要】絶対に main ブランチへ直接 push しないでください。"
+#claude --dangerously-skip-permissions --verbose --model claude-opus-4-6 --output-format stream-json -p "Backlog MCPを使用して、課題 $ISSUE_ID の内容を確認してください。その内容に基づいてコードを実装し、テストをパスさせ（UIのみのタスクについては不要）、プルリクエストを作成してください。デザインが必要な場合はfigma desktop mcpを使用してデータを読み取ってください。完了したらPRのURLを教えてください。【重要】絶対に main ブランチへ直接 push しないでください。"
+PROMPT="以下のSTEPに従って作業してください。
+
+STEP1: Backlog MCPを使用して課題 ${ISSUE_ID} の内容を確認し、課題IDに基づいたブランチを作成してください。フォーマットは feat/${ISSUE_ID} 。例: feat/RA_DEV-1234 。ブランチ作成後、必ずそのブランチに切り替えてください。\
+
+STEP2: 課題内容に基づいてコードを実装し、テストをパスさせてください。\
+デザインが必要な場合は、まず figma-desktop MCP を試してアプリからデータを取得し、\
+接続できない場合は figma MCP (HTTP版) を使用して API 経由でデータを読み取ってください。\
+.claude/commands/commit-dry.md を参考に適切な粒度でコミットしてください。
+
+STEP3: すべての作業が完了したら、実施内容を報告してください。PRは作成不要です。
+
+【重要】絶対に ${BASE_BRANCH} ブランチへ直接 push しないでください。"
+
+claude --dangerously-skip-permissions \
+  --verbose \
+  --model claude-opus-4-6 \
+  --output-format stream-json \
+  -p "$PROMPT"
 echo "Task completed at $(date)"

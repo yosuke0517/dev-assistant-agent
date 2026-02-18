@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import pty from 'node-pty';
 import fetch from 'node-fetch';
@@ -13,6 +14,29 @@ app.use(express.json());
 export function parseInput(rawText) {
     const parts = rawText.split(/[,、 ]+/);
     return { folder: parts[0], issueId: parts[1] };
+}
+
+/**
+ * Slack chat.postMessage でメッセージ送信
+ * @returns {Promise<string|null>} メッセージの ts (スレッドID) or null
+ */
+export async function postToSlack(channel, text, threadTs = null, fetchFn = fetch) {
+    const token = process.env.SLACK_BOT_TOKEN;
+    if (!token) { console.error('SLACK_BOT_TOKEN 未設定'); return null; }
+    try {
+        const body = { channel, text, ...(threadTs && { thread_ts: threadTs }) };
+        const res = await fetchFn('https://slack.com/api/chat.postMessage', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        if (!data.ok) { console.error('Slack API エラー:', data.error); return null; }
+        return data.ts;
+    } catch (err) {
+        console.error('Slack 送信エラー:', err.message);
+        return null;
+    }
 }
 
 function timestamp() {
@@ -91,17 +115,18 @@ export function processStreamEvent(line, tracker = null) {
  * 1分ごとのタイマーでSlackに送信し、バッファをリセット
  */
 export class ProgressTracker {
-    constructor(responseUrl, issueId, intervalMs = 60_000, fetchFn = fetch) {
-        this.responseUrl = responseUrl;
+    constructor(channel, issueId, threadTs, intervalMs = 60_000, postFn = postToSlack) {
+        this.channel = channel;
         this.issueId = issueId;
+        this.threadTs = threadTs;
         this.intervalMs = intervalMs;
         this.activities = [];
         this.timer = null;
-        this._fetch = fetchFn;
+        this._post = postFn;
     }
 
     start() {
-        if (!this.responseUrl) return;
+        if (!this.channel) return;
         this.timer = setInterval(() => this._flush(), this.intervalMs);
     }
 
@@ -118,7 +143,7 @@ export class ProgressTracker {
     }
 
     async _flush() {
-        if (!this.responseUrl || this.activities.length === 0) return;
+        if (!this.channel || this.activities.length === 0) return;
 
         // 直近のアクティビティをまとめて送信（最大10件）
         const recent = this.activities.slice(-10);
@@ -127,11 +152,7 @@ export class ProgressTracker {
         const text = `⏳ *${this.issueId}* 進捗レポート\n${recent.map(a => `• ${a}`).join('\n')}`;
 
         try {
-            await this._fetch(this.responseUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text, replace_original: false })
-            });
+            await this._post(this.channel, text, this.threadTs);
         } catch (err) {
             console.error('進捗通知の送信に失敗:', err.message);
         }
@@ -162,18 +183,22 @@ function summarizeToolInput(toolName, input) {
 
 app.post('/do', async (req, res) => {
     const { folder, issueId } = parseInput(req.body.text || "");
-    const responseUrl = req.body.response_url;
+    const channelId = req.body.channel_id;
 
     if (!folder || !issueId) {
         return res.status(400).send('引数不足。例: circus_agent_ecosystem RA_DEV-81');
     }
 
+    // 1. 即レス（Slack 3秒ルール）
     res.send(`了解。${folder} にて ${issueId} の対応を開始しました。MBPのターミナルで進捗を確認してください。`);
 
     console.log(`\n${timestamp()} 🚀 実行開始: ${folder}, ID: ${issueId}`);
 
-    // Slack進捗通知トラッカー（1分ごとに進捗をSlackへ送信）
-    const tracker = new ProgressTracker(responseUrl, issueId);
+    // 2. 親メッセージを chat.postMessage で投稿 → ts (スレッドID) 取得
+    const parentTs = await postToSlack(channelId, `🚀 *${folder}* にて *${issueId}* の対応を開始しました。\n進捗はこのスレッドでお知らせします。`);
+
+    // 3. Slack進捗通知トラッカー（1分ごとにスレッドへ進捗を送信）
+    const tracker = new ProgressTracker(channelId, issueId, parentTs);
     tracker.start();
 
     // Claude Code内から起動された場合のネスト検出を回避
@@ -230,21 +255,15 @@ app.post('/do', async (req, res) => {
         }
         console.log(`\n${timestamp()} ✅ 実行完了 (Exit Code: ${exitCode})`);
 
-        if (responseUrl) {
+        // 4. 完了メッセージをスレッドに投稿
+        if (channelId && parentTs) {
             const prUrlMatch = output.match(/https:\/\/github\.com\/[^\s"]+\/pull\/\d+/);
             const prMessage = prUrlMatch
                 ? `\nPRが作成されました: ${prUrlMatch[0]}`
                 : "\nPRの作成を確認できませんでした。詳細はターミナルのログを確認してください。";
 
             try {
-                await fetch(responseUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        text: `✅ 課題 ${issueId} の対応が完了しました！ (Exit Code: ${exitCode})${prMessage}`,
-                        replace_original: false
-                    })
-                });
+                await postToSlack(channelId, `✅ 課題 *${issueId}* の対応が完了しました！ (Exit Code: ${exitCode})${prMessage}`, parentTs);
             } catch (err) {
                 console.error('Slackへの通知に失敗しました:', err);
             }

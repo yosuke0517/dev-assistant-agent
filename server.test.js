@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { parseInput, processStreamEvent, ProgressTracker } from './server.js';
+import { parseInput, processStreamEvent, ProgressTracker, postToSlack } from './server.js';
 
 describe('parseInput', () => {
     it('スペース区切りでパースできる', () => {
@@ -171,7 +171,7 @@ describe('processStreamEvent', () => {
 
     it('trackerにアクティビティが記録される', () => {
         const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-        const tracker = new ProgressTracker(null, 'TEST-1');
+        const tracker = new ProgressTracker(null, 'TEST-1', null);
 
         processStreamEvent(JSON.stringify({
             type: 'assistant',
@@ -199,15 +199,15 @@ describe('ProgressTracker', () => {
         vi.useRealTimers();
     });
 
-    it('responseUrlがない場合タイマーは開始しない', () => {
-        const tracker = new ProgressTracker(null, 'TEST-1');
+    it('channelがない場合タイマーは開始しない', () => {
+        const tracker = new ProgressTracker(null, 'TEST-1', null);
         tracker.start();
         expect(tracker.timer).toBeNull();
         tracker.stop();
     });
 
     it('アクティビティが蓄積される', () => {
-        const tracker = new ProgressTracker('https://hooks.slack.com/test', 'TEST-1');
+        const tracker = new ProgressTracker('C123456', 'TEST-1', '1234.5678');
         tracker.addActivity('💬 テスト1');
         tracker.addActivity('🔧 テスト2');
         expect(tracker.activities).toHaveLength(2);
@@ -215,60 +215,148 @@ describe('ProgressTracker', () => {
     });
 
     it('flushでアクティビティがリセットされる', async () => {
-        const mockFetch = vi.fn().mockResolvedValue({ ok: true });
+        const mockPostFn = vi.fn().mockResolvedValue('mock-ts');
 
-        const tracker = new ProgressTracker('https://hooks.slack.com/test', 'TEST-1', 60_000, mockFetch);
+        const tracker = new ProgressTracker('C123456', 'TEST-1', '1234.5678', 60_000, mockPostFn);
         tracker.addActivity('💬 テスト');
         await tracker._flush();
 
         expect(tracker.activities).toHaveLength(0);
-        expect(mockFetch).toHaveBeenCalledTimes(1);
+        expect(mockPostFn).toHaveBeenCalledTimes(1);
 
         // 送信内容を確認
-        const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-        expect(body.text).toContain('TEST-1');
-        expect(body.text).toContain('テスト');
+        const [channel, text, threadTs] = mockPostFn.mock.calls[0];
+        expect(channel).toBe('C123456');
+        expect(text).toContain('TEST-1');
+        expect(text).toContain('テスト');
+        expect(threadTs).toBe('1234.5678');
 
         tracker.stop();
     });
 
     it('アクティビティが空の場合flushしない', async () => {
-        const mockFetch = vi.fn().mockResolvedValue({ ok: true });
+        const mockPostFn = vi.fn().mockResolvedValue('mock-ts');
 
-        const tracker = new ProgressTracker('https://hooks.slack.com/test', 'TEST-1', 60_000, mockFetch);
+        const tracker = new ProgressTracker('C123456', 'TEST-1', '1234.5678', 60_000, mockPostFn);
         await tracker._flush();
 
-        expect(mockFetch).not.toHaveBeenCalled();
+        expect(mockPostFn).not.toHaveBeenCalled();
         tracker.stop();
     });
 
     it('最大10件に制限される', async () => {
-        const mockFetch = vi.fn().mockResolvedValue({ ok: true });
+        const mockPostFn = vi.fn().mockResolvedValue('mock-ts');
 
-        const tracker = new ProgressTracker('https://hooks.slack.com/test', 'TEST-1', 60_000, mockFetch);
+        const tracker = new ProgressTracker('C123456', 'TEST-1', '1234.5678', 60_000, mockPostFn);
         for (let i = 0; i < 15; i++) {
             tracker.addActivity(`アクティビティ ${i}`);
         }
         await tracker._flush();
 
-        const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+        const [channel, text, threadTs] = mockPostFn.mock.calls[0];
         // 直近10件のみ（5〜14）
-        expect(body.text).toContain('アクティビティ 5');
-        expect(body.text).toContain('アクティビティ 14');
-        expect(body.text).not.toContain('アクティビティ 4');
+        expect(text).toContain('アクティビティ 5');
+        expect(text).toContain('アクティビティ 14');
+        expect(text).not.toContain('アクティビティ 4');
 
         tracker.stop();
     });
 
-    it('fetch失敗でもクラッシュしない', async () => {
-        const mockFetch = vi.fn().mockRejectedValue(new Error('network error'));
+    it('post失敗でもクラッシュしない', async () => {
+        const mockPostFn = vi.fn().mockRejectedValue(new Error('network error'));
         const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-        const tracker = new ProgressTracker('https://hooks.slack.com/test', 'TEST-1', 60_000, mockFetch);
+        const tracker = new ProgressTracker('C123456', 'TEST-1', '1234.5678', 60_000, mockPostFn);
         tracker.addActivity('テスト');
         await expect(tracker._flush()).resolves.toBeUndefined();
 
         consoleSpy.mockRestore();
         tracker.stop();
+    });
+});
+
+describe('postToSlack', () => {
+    it('SLACK_BOT_TOKEN未設定の場合はnullを返す', async () => {
+        const originalToken = process.env.SLACK_BOT_TOKEN;
+        delete process.env.SLACK_BOT_TOKEN;
+        const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+        const result = await postToSlack('C123456', 'テスト');
+
+        expect(result).toBeNull();
+        expect(consoleSpy).toHaveBeenCalledWith('SLACK_BOT_TOKEN 未設定');
+
+        consoleSpy.mockRestore();
+        process.env.SLACK_BOT_TOKEN = originalToken;
+    });
+
+    it('Slack API呼び出しが成功した場合tsを返す', async () => {
+        const originalToken = process.env.SLACK_BOT_TOKEN;
+        process.env.SLACK_BOT_TOKEN = 'xoxb-test-token';
+
+        // node-fetch をモック
+        const mockFetch = vi.fn().mockResolvedValue({
+            json: vi.fn().mockResolvedValue({ ok: true, ts: '1234.5678' })
+        });
+
+        const result = await postToSlack('C123456', 'テストメッセージ', null, mockFetch);
+
+        expect(result).toBe('1234.5678');
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+
+        process.env.SLACK_BOT_TOKEN = originalToken;
+    });
+
+    it('スレッド返信の場合thread_tsが含まれる', async () => {
+        const originalToken = process.env.SLACK_BOT_TOKEN;
+        process.env.SLACK_BOT_TOKEN = 'xoxb-test-token';
+
+        const mockFetch = vi.fn().mockResolvedValue({
+            json: vi.fn().mockResolvedValue({ ok: true, ts: '1234.5679' })
+        });
+
+        const result = await postToSlack('C123456', 'スレッド返信', '1234.5678', mockFetch);
+
+        expect(result).toBe('1234.5679');
+
+        // リクエストボディを確認
+        const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+        expect(body.thread_ts).toBe('1234.5678');
+
+        process.env.SLACK_BOT_TOKEN = originalToken;
+    });
+
+    it('Slack APIエラーの場合nullを返す', async () => {
+        const originalToken = process.env.SLACK_BOT_TOKEN;
+        process.env.SLACK_BOT_TOKEN = 'xoxb-test-token';
+        const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+        const mockFetch = vi.fn().mockResolvedValue({
+            json: vi.fn().mockResolvedValue({ ok: false, error: 'channel_not_found' })
+        });
+
+        const result = await postToSlack('C123456', 'テスト', null, mockFetch);
+
+        expect(result).toBeNull();
+        expect(consoleSpy).toHaveBeenCalledWith('Slack API エラー:', 'channel_not_found');
+
+        consoleSpy.mockRestore();
+        process.env.SLACK_BOT_TOKEN = originalToken;
+    });
+
+    it('ネットワークエラーの場合nullを返す', async () => {
+        const originalToken = process.env.SLACK_BOT_TOKEN;
+        process.env.SLACK_BOT_TOKEN = 'xoxb-test-token';
+        const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+        const mockFetch = vi.fn().mockRejectedValue(new Error('Network error'));
+
+        const result = await postToSlack('C123456', 'テスト', null, mockFetch);
+
+        expect(result).toBeNull();
+        expect(consoleSpy).toHaveBeenCalledWith('Slack 送信エラー:', 'Network error');
+
+        consoleSpy.mockRestore();
+        process.env.SLACK_BOT_TOKEN = originalToken;
     });
 });
