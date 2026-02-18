@@ -34,6 +34,32 @@ describe('stealth-run.sh', () => {
         }
     });
 
+    it('agentキーワードの場合、dev-assistant-agentディレクトリが存在する', () => {
+        const fs = require ? require('fs') : null;
+        // ESM環境でのチェック
+        const agentProjectPath = process.env.AGENT_PROJECT_PATH || '/Users/takeuchiyosuke/work/dev-assistant-agent';
+        const workspaceRoot = process.env.WORKSPACE_ROOT || '/Users/takeuchiyosuke/work/circus';
+        const checkScript = `
+            FOLDER_NAME="agent"
+            AGENT_PROJECT_PATH="${agentProjectPath}"
+            WORKSPACE_ROOT="${workspaceRoot}"
+            if [ "$FOLDER_NAME" = "agent" ]; then
+                TARGET_PATH="$AGENT_PROJECT_PATH"
+            else
+                TARGET_PATH="$WORKSPACE_ROOT/$FOLDER_NAME"
+            fi
+            if [ -d "$TARGET_PATH" ]; then
+                echo "exists:$TARGET_PATH"
+                exit 0
+            else
+                echo "not found:$TARGET_PATH"
+                exit 1
+            fi
+        `;
+        const result = execSync(checkScript, { encoding: 'utf8' });
+        expect(result.trim()).toContain(`exists:${agentProjectPath}`);
+    });
+
     it('ディレクトリが存在する場合、最初のチェックは通過する（git操作前まで）', () => {
         // 実際に存在するディレクトリ（カレントディレクトリ）を使用
         const existingFolder = '.';
@@ -45,7 +71,7 @@ describe('stealth-run.sh', () => {
 
         // 代わりに、存在チェックのロジックだけを確認
         const checkScript = `
-            WORKSPACE_ROOT="/Users/takeuchiyosuke/work/circus"
+            WORKSPACE_ROOT="${process.env.WORKSPACE_ROOT || '/Users/takeuchiyosuke/work/circus'}"
             TARGET_PATH="$WORKSPACE_ROOT/."
             if [ -d "$TARGET_PATH" ]; then
                 echo "Directory exists"

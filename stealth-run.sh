@@ -10,15 +10,25 @@ if [ -f "$SCRIPT_DIR/.env" ]; then
 fi
 
 # 引数の受け取り
-FOLDER_NAME=$1  # 例: circus_backend
-ISSUE_ID=$2    # 例: PROJ-123
+FOLDER_NAME=$1  # 例: circus_backend または agent
+ISSUE_ID=$2    # 例: PROJ-123 または GitHub Issue番号
 
-# ワークスペースのベースパス
-WORKSPACE_ROOT="/Users/takeuchiyosuke/work/circus"
+# 環境変数チェック
+if [ -z "$WORKSPACE_ROOT" ] || [ -z "$AGENT_PROJECT_PATH" ]; then
+    echo "Error: WORKSPACE_ROOT and AGENT_PROJECT_PATH must be set in .env"
+    exit 1
+fi
+
+# ルーティング: agentキーワードの場合は本プロジェクトを対象にする
+if [ "$FOLDER_NAME" = "agent" ]; then
+    TARGET_PATH="$AGENT_PROJECT_PATH"
+    IS_SELF_PROJECT=true
+else
+    TARGET_PATH="$WORKSPACE_ROOT/$FOLDER_NAME"
+    IS_SELF_PROJECT=false
+fi
 
 # 1. 指定されたフォルダへ移動
-TARGET_PATH="$WORKSPACE_ROOT/$FOLDER_NAME"
-
 if [ -d "$TARGET_PATH" ]; then
     cd "$TARGET_PATH"
     echo "Directory changed to: $(pwd)"
@@ -52,13 +62,24 @@ git config user.name "$GIT_USER_NAME"
 git config user.email "$GIT_USER_EMAIL"
 
 # 4. エージェントによる実装実行
-# Backlog MCPを使用して課題内容を読み取るよう明示
-echo "Claude Code starting for Backlog Issue: $ISSUE_ID..."
+if [ "$IS_SELF_PROJECT" = true ]; then
+    echo "Claude Code starting for GitHub Issue: #${ISSUE_ID}..."
+    PROMPT="以下のSTEPに従って作業してください。
 
-# --verbose を追加
-# -y を追加して、ツール実行の確認をすべてスキップさせる
-#claude --dangerously-skip-permissions --verbose --model claude-opus-4-6 --output-format stream-json -p "Backlog MCPを使用して、課題 $ISSUE_ID の内容を確認してください。その内容に基づいてコードを実装し、テストをパスさせ（UIのみのタスクについては不要）、プルリクエストを作成してください。デザインが必要な場合はfigma desktop mcpを使用してデータを読み取ってください。完了したらPRのURLを教えてください。【重要】絶対に main ブランチへ直接 push しないでください。"
-PROMPT="以下のSTEPに従って作業してください。
+STEP1: GitHub MCPを使用して yosuke0517/dev-assistant-agent リポジトリの Issue #${ISSUE_ID} の内容を確認してください。
+Issue内容に基づいたブランチを作成してください。フォーマットは feat/issue-${ISSUE_ID} または fix/issue-${ISSUE_ID}（内容に応じて選択）。
+ブランチ作成後、必ずそのブランチに切り替えてください。
+
+STEP2: Issue内容に基づいてコードを実装し、テストをパスさせてください。
+適切な粒度でコミットしてください。
+
+STEP3: すべての作業が完了したら、作業ブランチをリモートにpushし、GitHub MCPを使用してPRを作成してください。
+PRのタイトルはIssue内容に基づいて簡潔に記述し、bodyには実施内容のサマリーを記載してください。
+
+【重要】絶対に ${BASE_BRANCH} ブランチへ直接 push しないでください。"
+else
+    echo "Claude Code starting for Backlog Issue: $ISSUE_ID..."
+    PROMPT="以下のSTEPに従って作業してください。
 
 STEP1: Backlog MCPを使用して課題 ${ISSUE_ID} の内容を確認し、課題IDに基づいたブランチを作成してください。フォーマットは feat/${ISSUE_ID} 。例: feat/RA_DEV-1234 。ブランチ作成後、必ずそのブランチに切り替えてください。\
 
@@ -70,6 +91,7 @@ STEP2: 課題内容に基づいてコードを実装し、テストをパスさ�
 STEP3: すべての作業が完了したら、実施内容を報告してください。PRは作成不要です。
 
 【重要】絶対に ${BASE_BRANCH} ブランチへ直接 push しないでください。"
+fi
 
 claude --dangerously-skip-permissions \
   --verbose \

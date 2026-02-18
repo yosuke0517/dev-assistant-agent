@@ -189,13 +189,17 @@ app.post('/do', async (req, res) => {
         return res.status(400).send('引数不足。例: circus_agent_ecosystem RA_DEV-81');
     }
 
-    // 1. 即レス（Slack 3秒ルール）
-    res.send(`了解。${folder} にて ${issueId} の対応を開始しました。MBPのターミナルで進捗を確認してください。`);
+    const isAgent = folder === 'agent';
+    const displayName = isAgent ? 'dev-assistant-agent' : folder;
+    const issueLabel = isAgent ? `GitHub Issue #${issueId}` : issueId;
 
-    console.log(`\n${timestamp()} 🚀 実行開始: ${folder}, ID: ${issueId}`);
+    // 1. 即レス（Slack 3秒ルール）
+    res.send(`了解。${displayName} にて ${issueLabel} の対応を開始しました。MBPのターミナルで進捗を確認してください。`);
+
+    console.log(`\n${timestamp()} 🚀 実行開始: ${displayName}, ID: ${issueLabel}`);
 
     // 2. 親メッセージを chat.postMessage で投稿 → ts (スレッドID) 取得
-    const parentTs = await postToSlack(channelId, `🚀 *${folder}* にて *${issueId}* の対応を開始しました。\n進捗はこのスレッドでお知らせします。`);
+    const parentTs = await postToSlack(channelId, `🚀 *${displayName}* にて *${issueLabel}* の対応を開始しました。\n進捗はこのスレッドでお知らせします。`);
 
     // 3. Slack進捗通知トラッカー（1分ごとにスレッドへ進捗を送信）
     const tracker = new ProgressTracker(channelId, issueId, parentTs);
@@ -263,7 +267,7 @@ app.post('/do', async (req, res) => {
                 : "\nPRの作成を確認できませんでした。詳細はターミナルのログを確認してください。";
 
             try {
-                await postToSlack(channelId, `✅ 課題 *${issueId}* の対応が完了しました！ (Exit Code: ${exitCode})${prMessage}`, parentTs);
+                await postToSlack(channelId, `✅ *${issueLabel}* の対応が完了しました！ (Exit Code: ${exitCode})${prMessage}`, parentTs);
             } catch (err) {
                 console.error('Slackへの通知に失敗しました:', err);
             }

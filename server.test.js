@@ -53,6 +53,14 @@ describe('parseInput', () => {
         expect(result.folder).toBe('circus_backend');
         expect(result.issueId).toBeUndefined();
     });
+
+    it('agentキーワードとGitHub Issue番号をパースできる', () => {
+        const result = parseInput('agent 5');
+        expect(result).toEqual({
+            folder: 'agent',
+            issueId: '5'
+        });
+    });
 });
 
 describe('processStreamEvent', () => {
