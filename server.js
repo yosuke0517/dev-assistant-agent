@@ -47,14 +47,14 @@ export async function postToSlack(channel, text, threadTs = null, fetchFn = fetc
  * @param {string} afterTs - この時刻以降のメッセージのみ取得
  * @param {object} options - ポーリング設定
  * @param {number} options.intervalMs - ポーリング間隔(ms) default: 5000
- * @param {number} options.timeoutMs - タイムアウト(ms) default: 300000 (5分)
+ * @param {number} options.timeoutMs - タイムアウト(ms) default: 1800000 (30分)
  * @param {Function} options.fetchFn - fetch関数（テスト用DI）
  * @returns {Promise<{text: string, user: string}|null>} ユーザー返信 or null (タイムアウト)
  */
 export async function waitForSlackReply(channel, threadTs, afterTs, options = {}) {
     const {
         intervalMs = 5_000,
-        timeoutMs = 300_000,
+        timeoutMs = 1_800_000,
         fetchFn = fetch,
     } = options;
     const token = process.env.SLACK_BOT_TOKEN;
@@ -226,7 +226,7 @@ export class InteractiveHandler {
         this.threadTs = threadTs;
         this._post = options.postFn || postToSlack;
         this._waitReply = options.waitReplyFn || waitForSlackReply;
-        this.timeoutMs = options.timeoutMs || 300_000;
+        this.timeoutMs = options.timeoutMs || 1_800_000;
     }
 
     /**
