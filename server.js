@@ -314,6 +314,10 @@ export function spawnWorker(folder, issueId, tracker, extraPrompt = null) {
         const args = ['./stealth-run.sh', folder, issueId];
         if (extraPrompt) args.push(extraPrompt);
 
+        // worktree パスを生成して stealth-run.sh に渡す
+        const repoName = folder === 'agent' ? 'dev-assistant-agent' : folder;
+        const worktreePath = `/tmp/finegate-worktrees/${repoName}-${Date.now()}`;
+
         // PTY経由で起動（バッファリング防止のためTTYが必要）
         const worker = pty.spawn('/bin/zsh', args, {
             name: 'xterm-256color',
@@ -324,7 +328,8 @@ export function spawnWorker(folder, issueId, tracker, extraPrompt = null) {
                 ...childEnv,
                 CI: "true",
                 FORCE_COLOR: "1",
-                TERM: "xterm-256color"
+                TERM: "xterm-256color",
+                WORKTREE_PATH: worktreePath
             }
         });
 
