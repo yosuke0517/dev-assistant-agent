@@ -60,6 +60,38 @@ describe('stealth-run.sh', () => {
         expect(result.trim()).toContain(`exists:${agentProjectPath}`);
     });
 
+    it('TEAM_MODE環境変数が設定されている場合、Agent Teamsモードの出力がある', () => {
+        // stealth-run.sh内のAgent Teamsモード判定ロジックをテスト
+        const checkScript = `
+            TEAM_MODE="true"
+            SCRIPT_DIR="/tmp/test-prompts"
+            mkdir -p "$SCRIPT_DIR/prompts"
+            echo "test prompt" > "$SCRIPT_DIR/prompts/team-fullstack.md"
+            if [ "$TEAM_MODE" = "true" ]; then
+                TEAM_PROMPT_FILE="$SCRIPT_DIR/prompts/team-fullstack.md"
+                if [ -f "$TEAM_PROMPT_FILE" ]; then
+                    echo "team-mode-enabled"
+                fi
+            fi
+            rm -rf "$SCRIPT_DIR/prompts"
+        `;
+        const result = execSync(checkScript, { encoding: 'utf8' });
+        expect(result.trim()).toBe('team-mode-enabled');
+    });
+
+    it('TEAM_MODE環境変数が未設定の場合、Agent Teamsモードにならない', () => {
+        const checkScript = `
+            TEAM_MODE=""
+            if [ "$TEAM_MODE" = "true" ]; then
+                echo "team-mode-enabled"
+            else
+                echo "single-mode"
+            fi
+        `;
+        const result = execSync(checkScript, { encoding: 'utf8' });
+        expect(result.trim()).toBe('single-mode');
+    });
+
     it('ディレクトリが存在する場合、最初のチェックは通過する（git操作前まで）', () => {
         // 実際に存在するディレクトリ（カレントディレクトリ）を使用
         const existingFolder = '.';

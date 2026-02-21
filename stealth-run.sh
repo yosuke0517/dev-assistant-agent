@@ -14,6 +14,9 @@ FOLDER_NAME=$1  # 例: circus_backend または agent
 ISSUE_ID=$2    # 例: PROJ-123 または GitHub Issue番号
 EXTRA_PROMPT=$3 # オプション: ユーザーからの追加指示（リトライ時に使用）
 
+# TEAM_MODE 環境変数（server.js から渡される）
+# "true" の場合、Agent Teams モードで実行する
+
 # 環境変数チェック
 if [ -z "$WORKSPACE_ROOT" ] || [ -z "$AGENT_PROJECT_PATH" ]; then
     echo "Error: WORKSPACE_ROOT and AGENT_PROJECT_PATH must be set in .env"
@@ -151,6 +154,19 @@ if [ -n "$EXTRA_PROMPT" ]; then
 
 【ユーザーからの追加指示】
 ${EXTRA_PROMPT}"
+fi
+
+# Agent Teams モードの場合、チーム構成プロンプトを付与し環境変数を設定
+if [ "$TEAM_MODE" = "true" ]; then
+    TEAM_PROMPT_FILE="$SCRIPT_DIR/prompts/team-fullstack.md"
+    if [ -f "$TEAM_PROMPT_FILE" ]; then
+        TEAM_PROMPT=$(cat "$TEAM_PROMPT_FILE")
+        PROMPT="${PROMPT}
+
+${TEAM_PROMPT}"
+    fi
+    export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
+    echo "Agent Teams mode enabled"
 fi
 
 claude --dangerously-skip-permissions \

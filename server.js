@@ -12,10 +12,13 @@ app.use(express.json());
 /**
  * 入力テキストをフォルダ名と課題IDに分割
  * 例: "circus_agent_ecosystem RA_DEV-81" -> { folder, issueId }
+ * 例: "circus_agent_ecosystem RA_DEV-81 --team" -> { folder, issueId, teamMode: true }
  */
 export function parseInput(rawText) {
     const parts = rawText.split(/[,、 ]+/);
-    return { folder: parts[0], issueId: parts[1] };
+    const teamMode = parts.includes('--team');
+    const filtered = parts.filter(p => p !== '--team');
+    return { folder: filtered[0], issueId: filtered[1], teamMode };
 }
 
 function timestamp() {
@@ -100,8 +103,15 @@ export class ProgressTracker {
         this.threadTs = threadTs;
         this.intervalMs = intervalMs;
         this.activities = [];
+        this.teammateActivities = {}; // { role: [activities] }
+        this.teamMode = false;
         this.timer = null;
         this._post = postFn;
+    }
+
+    /** Agent Teamsモードを有効にする */
+    enableTeamMode() {
+        this.teamMode = true;
     }
 
     start() {
@@ -121,19 +131,55 @@ export class ProgressTracker {
         this.activities.push(message);
     }
 
+    /** Teammate別の進捗メッセージを追加 */
+    addTeammateActivity(role, message) {
+        if (!this.teammateActivities[role]) {
+            this.teammateActivities[role] = [];
+        }
+        this.teammateActivities[role].push(message);
+    }
+
     async _flush() {
-        if (!this.channel || this.activities.length === 0) return;
+        if (!this.channel) return;
 
-        // 直近のアクティビティをまとめて送信（最大10件）
-        const recent = this.activities.slice(-10);
+        const hasActivities = this.activities.length > 0;
+        const hasTeammateActivities = Object.keys(this.teammateActivities).length > 0;
+
+        if (!hasActivities && !hasTeammateActivities) return;
+
+        let text;
+
+        if (this.teamMode && hasTeammateActivities) {
+            // Agent Teamsモード: Teammate別にグループ化して表示
+            const roleIcons = { 'Lead': '\ud83d\udc64', 'BE\u62c5\u5f53': '\ud83d\udd27', 'FE\u62c5\u5f53': '\ud83c\udfa8' };
+            const parts = [`\u23f3 *${this.issueId}* \u9032\u6357\u30ec\u30dd\u30fc\u30c8`];
+
+            for (const [role, acts] of Object.entries(this.teammateActivities)) {
+                const icon = roleIcons[role] || '\ud83d\udccc';
+                const recent = acts.slice(-3);
+                parts.push(`${icon} *${role}*: ${recent.join(' / ')}`);
+            }
+
+            // Lead全体のアクティビティも含める
+            if (hasActivities) {
+                const recent = this.activities.slice(-5);
+                parts.push(`\n${recent.map(a => `\u2022 ${a}`).join('\n')}`);
+            }
+
+            text = parts.join('\n');
+            this.teammateActivities = {};
+        } else {
+            // 通常モード: 既存の挙動
+            const recent = this.activities.slice(-10);
+            text = `\u23f3 *${this.issueId}* \u9032\u6357\u30ec\u30dd\u30fc\u30c8\n${recent.map(a => `\u2022 ${a}`).join('\n')}`;
+        }
+
         this.activities = [];
-
-        const text = `⏳ *${this.issueId}* 進捗レポート\n${recent.map(a => `• ${a}`).join('\n')}`;
 
         try {
             await this._post(this.channel, text, this.threadTs);
         } catch (err) {
-            console.error('進捗通知の送信に失敗:', err.message);
+            console.error('\u9032\u6357\u901a\u77e5\u306e\u9001\u4fe1\u306b\u5931\u6557:', err.message);
         }
     }
 }
@@ -223,9 +269,10 @@ function summarizeToolInput(toolName, input) {
 
 /**
  * Claude Codeワーカープロセスを起動し、完了を待つ
+ * @param {boolean} teamMode - Agent Teamsモードで起動するか
  * @returns {Promise<{exitCode: number, output: string}>}
  */
-export function spawnWorker(folder, issueId, tracker, extraPrompt = null) {
+export function spawnWorker(folder, issueId, tracker, extraPrompt = null, teamMode = false) {
     return new Promise((resolve) => {
         // Claude Code内から起動された場合のネスト検出を回避
         const childEnv = { ...process.env };
@@ -254,6 +301,7 @@ export function spawnWorker(folder, issueId, tracker, extraPrompt = null) {
                 WORKTREE_PATH: worktreePath,
                 SLACK_CHANNEL: tracker?.channel || '',
                 SLACK_THREAD_TS: tracker?.threadTs || '',
+                TEAM_MODE: teamMode ? 'true' : '',
             }
         });
 
@@ -329,7 +377,7 @@ export function extractErrorSummary(output) {
 }
 
 app.post('/do', async (req, res) => {
-    const { folder, issueId } = parseInput(req.body.text || "");
+    const { folder, issueId, teamMode } = parseInput(req.body.text || "");
     const channelId = req.body.channel_id;
 
     if (!folder || !issueId) {
@@ -339,17 +387,19 @@ app.post('/do', async (req, res) => {
     const isAgent = folder === 'agent';
     const displayName = isAgent ? 'dev-assistant-agent' : folder;
     const issueLabel = isAgent ? `GitHub Issue #${issueId}` : issueId;
+    const modeLabel = teamMode ? ' (Agent Teams)' : '';
 
     // 1. 即レス（Slack 3秒ルール）
-    res.send(`了解。${displayName} にて ${issueLabel} の対応を開始しました。MBPのターミナルで進捗を確認してください。`);
+    res.send(`了解。${displayName} にて ${issueLabel} の対応を開始しました。${modeLabel ? modeLabel + ' ' : ''}MBPのターミナルで進捗を確認してください。`);
 
-    console.log(`\n${timestamp()} 🚀 実行開始: ${displayName}, ID: ${issueLabel}`);
+    console.log(`\n${timestamp()} 🚀 実行開始: ${displayName}, ID: ${issueLabel}${modeLabel}`);
 
     // 2. 親メッセージを chat.postMessage で投稿 → ts (スレッドID) 取得
-    const parentTs = await postToSlack(channelId, `🚀 *${displayName}* にて *${issueLabel}* の対応を開始しました。\n進捗はこのスレッドでお知らせします。`);
+    const parentTs = await postToSlack(channelId, `🚀 *${displayName}* にて *${issueLabel}* の対応を開始しました。${modeLabel}\n進捗はこのスレッドでお知らせします。`);
 
     // 3. Slack進捗通知トラッカー（1分ごとにスレッドへ進捗を送信）
     const tracker = new ProgressTracker(channelId, issueId, parentTs);
+    if (teamMode) tracker.enableTeamMode();
     tracker.start();
 
     // 4. インタラクティブハンドラー（エラー時にSlackで確認）
@@ -368,7 +418,7 @@ app.post('/do', async (req, res) => {
             await postToSlack(channelId, `🔄 *${issueLabel}* をリトライ実行します (${attempt}/${MAX_RETRIES})`, parentTs);
         }
 
-        const { exitCode, output } = await spawnWorker(folder, issueId, tracker, extraPrompt);
+        const { exitCode, output } = await spawnWorker(folder, issueId, tracker, extraPrompt, teamMode);
         lastExitCode = exitCode;
         lastOutput = output;
 

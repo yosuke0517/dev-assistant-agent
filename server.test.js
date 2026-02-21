@@ -6,7 +6,8 @@ describe('parseInput', () => {
         const result = parseInput('circus_backend PROJ-123');
         expect(result).toEqual({
             folder: 'circus_backend',
-            issueId: 'PROJ-123'
+            issueId: 'PROJ-123',
+            teamMode: false
         });
     });
 
@@ -14,7 +15,8 @@ describe('parseInput', () => {
         const result = parseInput('circus_backend,PROJ-123');
         expect(result).toEqual({
             folder: 'circus_backend',
-            issueId: 'PROJ-123'
+            issueId: 'PROJ-123',
+            teamMode: false
         });
     });
 
@@ -22,7 +24,8 @@ describe('parseInput', () => {
         const result = parseInput('circus_backend, PROJ-123');
         expect(result).toEqual({
             folder: 'circus_backend',
-            issueId: 'PROJ-123'
+            issueId: 'PROJ-123',
+            teamMode: false
         });
     });
 
@@ -30,7 +33,8 @@ describe('parseInput', () => {
         const result = parseInput('circus_backend、PROJ-123');
         expect(result).toEqual({
             folder: 'circus_backend',
-            issueId: 'PROJ-123'
+            issueId: 'PROJ-123',
+            teamMode: false
         });
     });
 
@@ -38,7 +42,8 @@ describe('parseInput', () => {
         const result = parseInput('circus_backend,  PROJ-123');
         expect(result).toEqual({
             folder: 'circus_backend',
-            issueId: 'PROJ-123'
+            issueId: 'PROJ-123',
+            teamMode: false
         });
     });
 
@@ -46,19 +51,49 @@ describe('parseInput', () => {
         const result = parseInput('');
         expect(result.folder).toBe('');
         expect(result.issueId).toBeUndefined();
+        expect(result.teamMode).toBe(false);
     });
 
     it('課題キーなしの場合、issueId が undefined になる', () => {
         const result = parseInput('circus_backend');
         expect(result.folder).toBe('circus_backend');
         expect(result.issueId).toBeUndefined();
+        expect(result.teamMode).toBe(false);
     });
 
     it('agentキーワードとGitHub Issue番号をパースできる', () => {
         const result = parseInput('agent 5');
         expect(result).toEqual({
             folder: 'agent',
-            issueId: '5'
+            issueId: '5',
+            teamMode: false
+        });
+    });
+
+    it('--teamフラグでteamModeがtrueになる', () => {
+        const result = parseInput('circus_agent_ecosystem RA_DEV-81 --team');
+        expect(result).toEqual({
+            folder: 'circus_agent_ecosystem',
+            issueId: 'RA_DEV-81',
+            teamMode: true
+        });
+    });
+
+    it('--teamフラグがない場合teamModeはfalse', () => {
+        const result = parseInput('circus_agent_ecosystem RA_DEV-81');
+        expect(result).toEqual({
+            folder: 'circus_agent_ecosystem',
+            issueId: 'RA_DEV-81',
+            teamMode: false
+        });
+    });
+
+    it('--teamフラグが中間にあっても正しくパースできる', () => {
+        const result = parseInput('circus_backend --team PROJ-123');
+        expect(result).toEqual({
+            folder: 'circus_backend',
+            issueId: 'PROJ-123',
+            teamMode: true
         });
     });
 });
@@ -279,6 +314,106 @@ describe('ProgressTracker', () => {
         await expect(tracker._flush()).resolves.toBeUndefined();
 
         consoleSpy.mockRestore();
+        tracker.stop();
+    });
+
+    it('enableTeamModeでチームモードが有効になる', () => {
+        const tracker = new ProgressTracker('C123456', 'TEST-1', '1234.5678');
+        expect(tracker.teamMode).toBe(false);
+        tracker.enableTeamMode();
+        expect(tracker.teamMode).toBe(true);
+        tracker.stop();
+    });
+
+    it('addTeammateActivityでロール別アクティビティが蓄積される', () => {
+        const tracker = new ProgressTracker('C123456', 'TEST-1', '1234.5678');
+        tracker.addTeammateActivity('BE担当', 'API実装中');
+        tracker.addTeammateActivity('FE担当', 'コンポーネント作成中');
+        tracker.addTeammateActivity('BE担当', 'テスト作成中');
+
+        expect(tracker.teammateActivities['BE担当']).toHaveLength(2);
+        expect(tracker.teammateActivities['FE担当']).toHaveLength(1);
+        tracker.stop();
+    });
+
+    it('チームモードでflushするとTeammate別フォーマットで送信される', async () => {
+        const mockPostFn = vi.fn().mockResolvedValue('mock-ts');
+
+        const tracker = new ProgressTracker('C123456', 'RA_DEV-81', '1234.5678', 60_000, mockPostFn);
+        tracker.enableTeamMode();
+        tracker.addTeammateActivity('Lead', 'タスク分解完了');
+        tracker.addTeammateActivity('BE担当', 'API実装中');
+        tracker.addTeammateActivity('FE担当', 'コンポーネント作成中');
+        await tracker._flush();
+
+        expect(mockPostFn).toHaveBeenCalledTimes(1);
+        const [channel, text, threadTs] = mockPostFn.mock.calls[0];
+        expect(channel).toBe('C123456');
+        expect(threadTs).toBe('1234.5678');
+        expect(text).toContain('RA_DEV-81');
+        expect(text).toContain('Lead');
+        expect(text).toContain('BE担当');
+        expect(text).toContain('FE担当');
+        expect(text).toContain('タスク分解完了');
+        expect(text).toContain('API実装中');
+        expect(text).toContain('コンポーネント作成中');
+
+        // flush後にteammateActivitiesがリセットされる
+        expect(Object.keys(tracker.teammateActivities)).toHaveLength(0);
+
+        tracker.stop();
+    });
+
+    it('チームモードでもteammateActivitiesが空なら通常フォーマットで送信される', async () => {
+        const mockPostFn = vi.fn().mockResolvedValue('mock-ts');
+
+        const tracker = new ProgressTracker('C123456', 'TEST-1', '1234.5678', 60_000, mockPostFn);
+        tracker.enableTeamMode();
+        tracker.addActivity('通常アクティビティ');
+        await tracker._flush();
+
+        expect(mockPostFn).toHaveBeenCalledTimes(1);
+        const [, text] = mockPostFn.mock.calls[0];
+        // 通常フォーマット（bullet point形式）
+        expect(text).toContain('• 通常アクティビティ');
+
+        tracker.stop();
+    });
+
+    it('チームモードflushでteammateActivitiesとactivities両方ある場合両方含まれる', async () => {
+        const mockPostFn = vi.fn().mockResolvedValue('mock-ts');
+
+        const tracker = new ProgressTracker('C123456', 'TEST-1', '1234.5678', 60_000, mockPostFn);
+        tracker.enableTeamMode();
+        tracker.addTeammateActivity('BE担当', 'API実装完了');
+        tracker.addActivity('全体進捗メッセージ');
+        await tracker._flush();
+
+        expect(mockPostFn).toHaveBeenCalledTimes(1);
+        const [, text] = mockPostFn.mock.calls[0];
+        expect(text).toContain('BE担当');
+        expect(text).toContain('API実装完了');
+        expect(text).toContain('全体進捗メッセージ');
+
+        tracker.stop();
+    });
+
+    it('チームモードでTeammateアクティビティは最大3件に制限される', async () => {
+        const mockPostFn = vi.fn().mockResolvedValue('mock-ts');
+
+        const tracker = new ProgressTracker('C123456', 'TEST-1', '1234.5678', 60_000, mockPostFn);
+        tracker.enableTeamMode();
+        for (let i = 0; i < 5; i++) {
+            tracker.addTeammateActivity('BE担当', `タスク${i}`);
+        }
+        await tracker._flush();
+
+        const [, text] = mockPostFn.mock.calls[0];
+        // 最新3件のみ表示 (2, 3, 4)
+        expect(text).toContain('タスク2');
+        expect(text).toContain('タスク4');
+        expect(text).not.toContain('タスク1');
+
         tracker.stop();
     });
 });
