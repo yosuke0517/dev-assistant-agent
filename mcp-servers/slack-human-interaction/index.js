@@ -11,11 +11,19 @@ const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000; // 30分
  * Slack経由でユーザーに質問し、回答を待つ
  */
 export async function handleAskHuman(question, context, options = {}) {
-    const channel = options.channel || process.env.SLACK_CHANNEL;
-    const threadTs = options.threadTs || process.env.SLACK_THREAD_TS;
-    const postFn = options.postFn || postToSlack;
-    const waitReplyFn = options.waitReplyFn || waitForSlackReply;
-    const timeoutMs = options.timeoutMs || DEFAULT_TIMEOUT_MS;
+    const channel = options.channel ?? process.env.SLACK_CHANNEL;
+    const threadTs = options.threadTs ?? process.env.SLACK_THREAD_TS;
+    const postFn = options.postFn ?? postToSlack;
+    const waitReplyFn = options.waitReplyFn ?? waitForSlackReply;
+    const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+
+    // 質問が空の場合はエラーを返す
+    if (!question || (typeof question === 'string' && question.trim() === '')) {
+        return {
+            content: [{ type: 'text', text: '質問内容が空です。質問を指定してください。' }],
+            isError: true,
+        };
+    }
 
     if (!channel || !threadTs) {
         return {
@@ -31,7 +39,15 @@ export async function handleAskHuman(question, context, options = {}) {
     message += `\n\n_回答をこのスレッドに返信してください（${Math.floor(timeoutMs / 60_000)}分以内）_`;
 
     // Slackに質問を投稿
-    const questionTs = await postFn(channel, message, threadTs);
+    let questionTs;
+    try {
+        questionTs = await postFn(channel, message, threadTs);
+    } catch (err) {
+        console.error('Slack投稿中に例外が発生:', err.message);
+        return {
+            content: [{ type: 'text', text: `Slackへの質問送信中にエラーが発生しました: ${err.message}。自己判断で進めてください。` }]
+        };
+    }
     if (!questionTs) {
         return {
             content: [{ type: 'text', text: 'Slackへの質問送信に失敗しました。自己判断で進めてください。' }]
@@ -39,7 +55,15 @@ export async function handleAskHuman(question, context, options = {}) {
     }
 
     // ユーザーの返信を待機
-    const reply = await waitReplyFn(channel, threadTs, questionTs, { timeoutMs });
+    let reply;
+    try {
+        reply = await waitReplyFn(channel, threadTs, questionTs, { timeoutMs });
+    } catch (err) {
+        console.error('Slack返信待機中に例外が発生:', err.message);
+        return {
+            content: [{ type: 'text', text: `返信の待機中にエラーが発生しました: ${err.message}。自己判断で進めてください。` }]
+        };
+    }
 
     if (!reply) {
         return {

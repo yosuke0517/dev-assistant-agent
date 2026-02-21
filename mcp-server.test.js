@@ -166,6 +166,66 @@ describe('handleAskHuman', () => {
         // postFnの引数: (channel, message, threadTs)
         expect(mockPost).toHaveBeenCalledWith('C999', expect.any(String), '1234.5678');
     });
+
+    it('空の質問文字列の場合はエラーを返す', async () => {
+        const result = await handleAskHuman('', null, {
+            channel: 'C123456',
+            threadTs: '1234.5678',
+        });
+
+        expect(result.content[0].text).toContain('質問内容が空です');
+        expect(result.isError).toBe(true);
+    });
+
+    it('空白のみの質問文字列の場合はエラーを返す', async () => {
+        const result = await handleAskHuman('   ', null, {
+            channel: 'C123456',
+            threadTs: '1234.5678',
+        });
+
+        expect(result.content[0].text).toContain('質問内容が空です');
+        expect(result.isError).toBe(true);
+    });
+
+    it('questionがnullの場合はエラーを返す', async () => {
+        const result = await handleAskHuman(null, null, {
+            channel: 'C123456',
+            threadTs: '1234.5678',
+        });
+
+        expect(result.content[0].text).toContain('質問内容が空です');
+        expect(result.isError).toBe(true);
+    });
+
+    it('postFnが例外をスローした場合はフォールバックメッセージを返す', async () => {
+        const mockPost = vi.fn().mockRejectedValue(new Error('Network error'));
+
+        const result = await handleAskHuman('質問です', null, {
+            channel: 'C123456',
+            threadTs: '1234.5678',
+            postFn: mockPost,
+        });
+
+        expect(result.content[0].text).toContain('エラーが発生しました');
+        expect(result.content[0].text).toContain('Network error');
+        expect(result.content[0].text).toContain('自己判断で進めてください');
+    });
+
+    it('waitReplyFnが例外をスローした場合はフォールバックメッセージを返す', async () => {
+        const mockPost = vi.fn().mockResolvedValue('1234.5680');
+        const mockWaitReply = vi.fn().mockRejectedValue(new Error('Connection lost'));
+
+        const result = await handleAskHuman('質問です', null, {
+            channel: 'C123456',
+            threadTs: '1234.5678',
+            postFn: mockPost,
+            waitReplyFn: mockWaitReply,
+        });
+
+        expect(result.content[0].text).toContain('エラーが発生しました');
+        expect(result.content[0].text).toContain('Connection lost');
+        expect(result.content[0].text).toContain('自己判断で進めてください');
+    });
 });
 
 describe('createServer', () => {
