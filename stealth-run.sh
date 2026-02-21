@@ -116,7 +116,7 @@ PRのタイトルはIssue内容に基づいて簡潔に記述し、bodyには実
 
 【重要】絶対に ${BASE_BRANCH} ブランチへ直接 push しないでください。
 
-【重要】実装中に以下のケースでは、必ず ask_human ツールを使用してSlackで確認してください:
+【重要】実装中に以下のケースでは、必ず ask_human MCPツールを使用してSlackで確認してください（※ AskUserQuestion は使用禁止。必ず ask_human を使うこと）:
 - 仕様の解釈が複数通りある場合
 - 課題の記述が曖昧で実装方針が定まらない場合
 - 破壊的な変更（既存APIの変更、DB スキーマ変更等）を行う前
@@ -137,7 +137,7 @@ STEP3: すべての作業が完了したら、実施内容を報告してくだ�
 
 【重要】絶対に ${BASE_BRANCH} ブランチへ直接 push しないでください。
 
-【重要】実装中に以下のケースでは、必ず ask_human ツールを使用してSlackで確認してください:
+【重要】実装中に以下のケースでは、必ず ask_human MCPツールを使用してSlackで確認してください（※ AskUserQuestion は使用禁止。必ず ask_human を使うこと）:
 - 仕様の解釈が複数通りある場合
 - 課題の記述が曖昧で実装方針が定まらない場合
 - 破壊的な変更（既存APIの変更、DB スキーマ変更等）を行う前
@@ -158,5 +158,6 @@ claude --dangerously-skip-permissions \
   --model claude-opus-4-6 \
   --output-format stream-json \
   --mcp-config "$MCP_CONFIG" \
+  --disallowedTools AskUserQuestion \
   -p "$PROMPT"
 echo "Task completed at $(date)"
