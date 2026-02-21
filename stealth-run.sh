@@ -61,18 +61,37 @@ mkdir -p "$(dirname "$WORKTREE_PATH")"
 echo "Creating worktree at: $WORKTREE_PATH"
 git -C "$TARGET_PATH" worktree add --detach "$WORKTREE_PATH" "origin/$BASE_BRANCH"
 
-# 5. エラー時・終了時に worktree をクリーンアップする trap
+# 5. MCP設定ファイルを動的に生成（ask_human ツール用）
+MCP_CONFIG="/tmp/finegate-mcp-config-$$.json"
+cat > "$MCP_CONFIG" << MCPEOF
+{
+  "mcpServers": {
+    "slack-human": {
+      "command": "node",
+      "args": ["$SCRIPT_DIR/mcp-servers/slack-human-interaction/index.js"],
+      "env": {
+        "SLACK_BOT_TOKEN": "${SLACK_BOT_TOKEN}",
+        "SLACK_CHANNEL": "${SLACK_CHANNEL}",
+        "SLACK_THREAD_TS": "${SLACK_THREAD_TS}"
+      }
+    }
+  }
+}
+MCPEOF
+
+# 6. エラー時・終了時に worktree と MCP設定をクリーンアップする trap
 cleanup() {
+    rm -f "$MCP_CONFIG"
     echo "Cleaning up worktree: $WORKTREE_PATH"
     git -C "$TARGET_PATH" worktree remove --force "$WORKTREE_PATH" 2>/dev/null || rm -rf "$WORKTREE_PATH"
 }
 trap cleanup EXIT
 
-# 6. worktree ディレクトリへ移動
+# 7. worktree ディレクトリへ移動
 cd "$WORKTREE_PATH"
 echo "Directory changed to: $(pwd)"
 
-# 7. ステルス設定 (環境変数から読み取り)
+# 8. ステルス設定 (環境変数から読み取り)
 if [ -z "$GIT_USER_NAME" ] || [ -z "$GIT_USER_EMAIL" ]; then
     echo "Error: GIT_USER_NAME and GIT_USER_EMAIL must be set in .env"
     exit 1
@@ -80,7 +99,7 @@ fi
 git config user.name "$GIT_USER_NAME"
 git config user.email "$GIT_USER_EMAIL"
 
-# 8. エージェントによる実装実行
+# 9. エージェントによる実装実行
 if [ "$IS_SELF_PROJECT" = true ]; then
     echo "Claude Code starting for GitHub Issue: #${ISSUE_ID}..."
     PROMPT="以下のSTEPに従って作業してください。
@@ -95,7 +114,14 @@ STEP2: Issue内容に基づいてコードを実装し、テストをパスさ�
 STEP3: すべての作業が完了したら、作業ブランチをリモートにpushし、GitHub MCPを使用してPRを作成してください。
 PRのタイトルはIssue内容に基づいて簡潔に記述し、bodyには実施内容のサマリーを記載してください。
 
-【重要】絶対に ${BASE_BRANCH} ブランチへ直接 push しないでください。"
+【重要】絶対に ${BASE_BRANCH} ブランチへ直接 push しないでください。
+
+【重要】実装中に以下のケースでは、必ず ask_human ツールを使用してSlackで確認してください:
+- 仕様の解釈が複数通りある場合
+- 課題の記述が曖昧で実装方針が定まらない場合
+- 破壊的な変更（既存APIの変更、DB スキーマ変更等）を行う前
+- 設計判断で迷った場合（例: このロジックはどこに置くべきか）
+勝手に解釈して進めず、必ず確認を取ってから実装してください。"
 else
     echo "Claude Code starting for Backlog Issue: $ISSUE_ID..."
     PROMPT="以下のSTEPに従って作業してください。
@@ -109,7 +135,14 @@ STEP2: 課題内容に基づいてコードを実装し、テストをパスさ�
 
 STEP3: すべての作業が完了したら、実施内容を報告してください。PRは作成不要です。
 
-【重要】絶対に ${BASE_BRANCH} ブランチへ直接 push しないでください。"
+【重要】絶対に ${BASE_BRANCH} ブランチへ直接 push しないでください。
+
+【重要】実装中に以下のケースでは、必ず ask_human ツールを使用してSlackで確認してください:
+- 仕様の解釈が複数通りある場合
+- 課題の記述が曖昧で実装方針が定まらない場合
+- 破壊的な変更（既存APIの変更、DB スキーマ変更等）を行う前
+- 設計判断で迷った場合（例: このロジックはどこに置くべきか）
+勝手に解釈して進めず、必ず確認を取ってから実装してください。"
 fi
 
 # ユーザーからの追加指示がある場合はプロンプトに付与
@@ -124,5 +157,6 @@ claude --dangerously-skip-permissions \
   --verbose \
   --model claude-opus-4-6 \
   --output-format stream-json \
+  --mcp-config "$MCP_CONFIG" \
   -p "$PROMPT"
 echo "Task completed at $(date)"
