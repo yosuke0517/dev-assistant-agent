@@ -29,21 +29,18 @@ else
     IS_SELF_PROJECT=false
 fi
 
-# 1. 指定されたフォルダへ移動
-if [ -d "$TARGET_PATH" ]; then
-    cd "$TARGET_PATH"
-    echo "Directory changed to: $(pwd)"
-else
+# 1. 指定されたフォルダの存在チェック
+if [ ! -d "$TARGET_PATH" ]; then
     echo "Error: Directory $TARGET_PATH does not exist."
     exit 1
 fi
 
-# 2. ベースブランチを自動検出してGit最新化
-BASE_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')
+# 2. ベースブランチを自動検出
+BASE_BRANCH=$(git -C "$TARGET_PATH" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')
 if [ -z "$BASE_BRANCH" ]; then
-    if git show-ref --verify --quiet refs/heads/main; then
+    if git -C "$TARGET_PATH" show-ref --verify --quiet refs/heads/main; then
         BASE_BRANCH="main"
-    elif git show-ref --verify --quiet refs/heads/master; then
+    elif git -C "$TARGET_PATH" show-ref --verify --quiet refs/heads/master; then
         BASE_BRANCH="master"
     else
         echo "Error: Could not detect base branch."
@@ -51,10 +48,31 @@ if [ -z "$BASE_BRANCH" ]; then
     fi
 fi
 echo "Base branch: $BASE_BRANCH"
-git checkout "$BASE_BRANCH"
-git pull origin "$BASE_BRANCH"
 
-# 3. ステルス設定 (環境変数から読み取り)
+# 3. 最新を取得（メインの作業ディレクトリには影響しない）
+git -C "$TARGET_PATH" fetch origin "$BASE_BRANCH"
+
+# 4. git worktree で一時作業ディレクトリを作成
+REPO_NAME=$(basename "$TARGET_PATH")
+if [ -z "$WORKTREE_PATH" ]; then
+    WORKTREE_PATH="/tmp/finegate-worktrees/${REPO_NAME}-$(date +%s)"
+fi
+mkdir -p "$(dirname "$WORKTREE_PATH")"
+echo "Creating worktree at: $WORKTREE_PATH"
+git -C "$TARGET_PATH" worktree add --detach "$WORKTREE_PATH" "origin/$BASE_BRANCH"
+
+# 5. エラー時・終了時に worktree をクリーンアップする trap
+cleanup() {
+    echo "Cleaning up worktree: $WORKTREE_PATH"
+    git -C "$TARGET_PATH" worktree remove --force "$WORKTREE_PATH" 2>/dev/null || rm -rf "$WORKTREE_PATH"
+}
+trap cleanup EXIT
+
+# 6. worktree ディレクトリへ移動
+cd "$WORKTREE_PATH"
+echo "Directory changed to: $(pwd)"
+
+# 7. ステルス設定 (環境変数から読み取り)
 if [ -z "$GIT_USER_NAME" ] || [ -z "$GIT_USER_EMAIL" ]; then
     echo "Error: GIT_USER_NAME and GIT_USER_EMAIL must be set in .env"
     exit 1
@@ -62,7 +80,7 @@ fi
 git config user.name "$GIT_USER_NAME"
 git config user.email "$GIT_USER_EMAIL"
 
-# 4. エージェントによる実装実行
+# 8. エージェントによる実装実行
 if [ "$IS_SELF_PROJECT" = true ]; then
     echo "Claude Code starting for GitHub Issue: #${ISSUE_ID}..."
     PROMPT="以下のSTEPに従って作業してください。
