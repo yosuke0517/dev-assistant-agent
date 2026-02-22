@@ -139,6 +139,17 @@ describe('stealth-run.sh', () => {
         expect(content).toContain('AskUserQuestion は使用禁止');
     });
 
+    it('非agentプロジェクトのプロンプトにPR作成の指示が含まれる', async () => {
+        const fs = await import('node:fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        // 非agentプロンプト（elseブロック）にPR作成指示がある
+        expect(content).toContain(
+            '作業ブランチをリモートにpushし、PRを作成してください',
+        );
+        // PR不要の例外条件がある
+        expect(content).toContain('コード変更を伴わない作業の場合');
+    });
+
     it('ディレクトリが存在する場合、最初のチェックは通過する（git操作前まで）', () => {
         // 実際に存在するディレクトリ（カレントディレクトリ）を使用
         const _existingFolder = '.';

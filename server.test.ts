@@ -987,3 +987,45 @@ describe('extractErrorSummary', () => {
         expect(summary).toContain('Error: something went wrong');
     });
 });
+
+describe('PR URL detection regex', () => {
+    // server.tsの /do エンドポイント内で使用されるPR URL検出パターン
+    const prUrlRegex =
+        /https:\/\/(?:github\.com\/[^\s"]+\/pull\/\d+|[^\s"]+\.backlog\.(?:jp|com)\/[^\s"]+\/pullRequests\/\d+)/;
+
+    it('GitHub PR URLを検出できる', () => {
+        const output =
+            'PRが作成されました https://github.com/yosuke0517/dev-assistant-agent/pull/35 完了';
+        const match = output.match(prUrlRegex);
+        expect(match).not.toBeNull();
+        expect(match?.[0]).toBe(
+            'https://github.com/yosuke0517/dev-assistant-agent/pull/35',
+        );
+    });
+
+    it('Backlog PR URL (.backlog.jp) を検出できる', () => {
+        const output =
+            'PRを作成しました https://myspace.backlog.jp/git/PROJ/repo/pullRequests/42 end';
+        const match = output.match(prUrlRegex);
+        expect(match).not.toBeNull();
+        expect(match?.[0]).toBe(
+            'https://myspace.backlog.jp/git/PROJ/repo/pullRequests/42',
+        );
+    });
+
+    it('Backlog PR URL (.backlog.com) を検出できる', () => {
+        const output =
+            'PR: https://myspace.backlog.com/git/PROJ/repo/pullRequests/123';
+        const match = output.match(prUrlRegex);
+        expect(match).not.toBeNull();
+        expect(match?.[0]).toBe(
+            'https://myspace.backlog.com/git/PROJ/repo/pullRequests/123',
+        );
+    });
+
+    it('PR URLが含まれない場合はnullを返す', () => {
+        const output = 'タスクが完了しました。レポートを送信します。';
+        const match = output.match(prUrlRegex);
+        expect(match).toBeNull();
+    });
+});

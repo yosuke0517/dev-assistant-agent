@@ -596,7 +596,7 @@ app.post('/do', async (req: Request, res: Response) => {
     // 6. 完了メッセージをスレッドに投稿
     if (channelId && parentTs) {
         const prUrlMatch = lastOutput.match(
-            /https:\/\/github\.com\/[^\s"]+\/pull\/\d+/,
+            /https:\/\/(?:github\.com\/[^\s"]+\/pull\/\d+|[^\s"]+\.backlog\.(?:jp|com)\/[^\s"]+\/pullRequests\/\d+)/,
         );
         const prMessage = prUrlMatch
             ? `\nPRが作成されました: ${prUrlMatch[0]}`
