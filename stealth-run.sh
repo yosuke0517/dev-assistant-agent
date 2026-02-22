@@ -79,6 +79,33 @@ cat > "$MCP_CONFIG" << MCPEOF
 }
 MCPEOF
 
+# 6. MCP設定の検証と依存関係の自動修復
+echo "MCP config: $MCP_CONFIG"
+cat "$MCP_CONFIG"
+
+# 環境変数の存在チェック（警告のみ）
+if [ -z "$SLACK_BOT_TOKEN" ]; then
+    echo "Warning: SLACK_BOT_TOKEN is not set. ask_human tool will not work."
+fi
+if [ -z "$SLACK_CHANNEL" ]; then
+    echo "Warning: SLACK_CHANNEL is not set. ask_human tool will not work."
+fi
+if [ -z "$SLACK_THREAD_TS" ]; then
+    echo "Warning: SLACK_THREAD_TS is not set. ask_human tool will not work."
+fi
+
+# node_modules の存在チェック → なければ npm install
+if [ ! -d "$SCRIPT_DIR/node_modules/@modelcontextprotocol" ]; then
+    echo "node_modules/@modelcontextprotocol not found. Running npm install..."
+    (cd "$SCRIPT_DIR" && npm install)
+fi
+
+# MCP Serverスクリプトのimportチェック → 失敗時は npm install で修復
+if ! node --input-type=module <<< "import '$SCRIPT_DIR/mcp-servers/slack-human-interaction/index.js'" 2>/dev/null; then
+    echo "MCP Server import failed. Running npm install to repair..."
+    (cd "$SCRIPT_DIR" && npm install)
+fi
+
 # 6. エラー時・終了時に worktree と MCP設定をクリーンアップする trap
 cleanup() {
     rm -f "$MCP_CONFIG"
@@ -116,6 +143,8 @@ PRのタイトルはIssue内容に基づいて簡潔に記述し、bodyには実
 
 【重要】絶対に ${BASE_BRANCH} ブランチへ直接 push しないでください。
 
+【重要】ask_human MCPツールは --mcp-config で事前設定済みです。MCPの設定ファイルを調査する必要はありません。直接呼び出してください。
+
 【重要】実装中に以下のケースでは、必ず ask_human MCPツールを使用してSlackで確認してください（※ AskUserQuestion は使用禁止。必ず ask_human を使うこと）:
 - 仕様の解釈が複数通りある場合
 - 課題の記述が曖昧で実装方針が定まらない場合
@@ -136,6 +165,8 @@ STEP2: 課題内容に基づいてコードを実装し、テストをパスさ�
 STEP3: すべての作業が完了したら、実施内容を報告してください。PRは作成不要です。
 
 【重要】絶対に ${BASE_BRANCH} ブランチへ直接 push しないでください。
+
+【重要】ask_human MCPツールは --mcp-config で事前設定済みです。MCPの設定ファイルを調査する必要はありません。直接呼び出してください。
 
 【重要】実装中に以下のケースでは、必ず ask_human MCPツールを使用してSlackで確認してください（※ AskUserQuestion は使用禁止。必ず ask_human を使うこと）:
 - 仕様の解釈が複数通りある場合

@@ -21,3 +21,8 @@
 1. **App作成**: [Slack API](https://api.slack.com/apps) で `Finegate-Agent` を作成。
 2. **Slash Command**: `/do` を作成。
 3. **エンドポイント**: `Request URL` に `https://agent.finegate.xyz/do` を設定。
+4. **Bot Token Scopes** に以下を設定する(OAuth & Permissions):
+   - `chat:write` — メッセージ送信（質問投稿・進捗通知）
+   - `channels:history` — パブリックチャンネルのメッセージ読み取り（返信受信）
+   - `groups:history` — プライベートチャンネルのメッセージ読み取り（返信受信）
+   - `commands` — Slash Commandの受信
