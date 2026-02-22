@@ -107,6 +107,50 @@ describe('handleAskHuman', () => {
         expect(postedMessage).toContain('Claude Codeからの質問');
     });
 
+    it('ownerSlackMemberIdが指定されている場合メンションが含まれる', async () => {
+        const mockPost = vi.fn().mockResolvedValue('1234.5680');
+        const mockWaitReply = vi
+            .fn()
+            .mockResolvedValue({ text: 'OK', user: 'U123' });
+
+        await handleAskHuman('質問です', null, {
+            channel: 'C123456',
+            threadTs: '1234.5678',
+            postFn: mockPost,
+            waitReplyFn: mockWaitReply,
+            ownerSlackMemberId: 'U99999999',
+        });
+
+        const postedMessage = mockPost.mock.calls[0][1];
+        expect(postedMessage).toContain('<@U99999999>');
+        expect(postedMessage).toContain('Claude Codeからの質問');
+    });
+
+    it('ownerSlackMemberIdが未指定の場合メンションが含まれない', async () => {
+        const originalOwner = process.env.OWNER_SLACK_MEMBER_ID;
+        delete process.env.OWNER_SLACK_MEMBER_ID;
+
+        const mockPost = vi.fn().mockResolvedValue('1234.5680');
+        const mockWaitReply = vi
+            .fn()
+            .mockResolvedValue({ text: 'OK', user: 'U123' });
+
+        await handleAskHuman('質問です', null, {
+            channel: 'C123456',
+            threadTs: '1234.5678',
+            postFn: mockPost,
+            waitReplyFn: mockWaitReply,
+        });
+
+        const postedMessage = mockPost.mock.calls[0][1];
+        expect(postedMessage).not.toContain('<@');
+        expect(postedMessage).toMatch(/^❓/);
+
+        if (originalOwner !== undefined) {
+            process.env.OWNER_SLACK_MEMBER_ID = originalOwner;
+        }
+    });
+
     it('contextが省略されても動作する', async () => {
         const mockPost = vi.fn().mockResolvedValue('1234.5680');
         const mockWaitReply = vi

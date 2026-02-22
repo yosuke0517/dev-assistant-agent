@@ -72,7 +72,8 @@ cat > "$MCP_CONFIG" << MCPEOF
       "env": {
         "SLACK_BOT_TOKEN": "${SLACK_BOT_TOKEN}",
         "SLACK_CHANNEL": "${SLACK_CHANNEL}",
-        "SLACK_THREAD_TS": "${SLACK_THREAD_TS}"
+        "SLACK_THREAD_TS": "${SLACK_THREAD_TS}",
+        "OWNER_SLACK_MEMBER_ID": "${OWNER_SLACK_MEMBER_ID}"
       }
     }
   }

@@ -825,6 +825,37 @@ describe('InteractiveHandler', () => {
         consoleSpy.mockRestore();
     });
 
+    it('OWNER_SLACK_MEMBER_ID設定時にエラーメッセージにメンションが含まれる', async () => {
+        const originalOwner = process.env.OWNER_SLACK_MEMBER_ID;
+        process.env.OWNER_SLACK_MEMBER_ID = 'U12345678';
+
+        const consoleSpy = vi
+            .spyOn(console, 'log')
+            .mockImplementation(() => {});
+        const mockPost = vi.fn().mockResolvedValue('1234.5680');
+        const mockWaitReply = vi
+            .fn()
+            .mockResolvedValue({ text: 'retry', user: 'U123' });
+
+        const handler = new InteractiveHandler('C123456', '1234.5678', {
+            postFn: mockPost,
+            waitReplyFn: mockWaitReply,
+        });
+
+        await handler.askUser('test error');
+
+        const sentText = mockPost.mock.calls[0][1];
+        expect(sentText).toContain('<@U12345678>');
+        expect(sentText).toContain('エラーが発生しました');
+
+        consoleSpy.mockRestore();
+        if (originalOwner !== undefined) {
+            process.env.OWNER_SLACK_MEMBER_ID = originalOwner;
+        } else {
+            delete process.env.OWNER_SLACK_MEMBER_ID;
+        }
+    });
+
     it('エラーサマリーが500文字を超える場合は切り詰められる', async () => {
         const consoleSpy = vi
             .spyOn(console, 'log')
