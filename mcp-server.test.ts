@@ -5,8 +5,8 @@ import {
 } from './mcp-servers/slack-human-interaction/index.js';
 
 describe('handleAskHuman', () => {
-    let originalChannel;
-    let originalThreadTs;
+    let originalChannel: string | undefined;
+    let originalThreadTs: string | undefined;
 
     beforeEach(() => {
         originalChannel = process.env.SLACK_CHANNEL;
