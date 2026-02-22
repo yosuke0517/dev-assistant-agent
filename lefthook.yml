@@ -1,0 +1,5 @@
+pre-commit:
+  commands:
+    biome-check:
+      glob: "*.{js,json}"
+      run: npx biome check --no-errors-on-unmatched --files-ignore-unknown=true {staged_files}

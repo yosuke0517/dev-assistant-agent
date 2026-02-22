@@ -1,8 +1,11 @@
+import { fileURLToPath } from 'node:url';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import {
+    CallToolRequestSchema,
+    ListToolsRequestSchema,
+} from '@modelcontextprotocol/sdk/types.js';
 import { postToSlack, waitForSlackReply } from '../../lib/slack.js';
-import { fileURLToPath } from 'url';
 
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000; // 30分
 
@@ -20,14 +23,24 @@ export async function handleAskHuman(question, context, options = {}) {
     // 質問が空の場合はエラーを返す
     if (!question || (typeof question === 'string' && question.trim() === '')) {
         return {
-            content: [{ type: 'text', text: '質問内容が空です。質問を指定してください。' }],
+            content: [
+                {
+                    type: 'text',
+                    text: '質問内容が空です。質問を指定してください。',
+                },
+            ],
             isError: true,
         };
     }
 
     if (!channel || !threadTs) {
         return {
-            content: [{ type: 'text', text: 'Slack未設定エラー: SLACK_CHANNEL または SLACK_THREAD_TS が設定されていないため、ユーザーへの質問ができません。' }],
+            content: [
+                {
+                    type: 'text',
+                    text: 'Slack未設定エラー: SLACK_CHANNEL または SLACK_THREAD_TS が設定されていないため、ユーザーへの質問ができません。',
+                },
+            ],
             isError: true,
         };
     }
@@ -46,13 +59,23 @@ export async function handleAskHuman(question, context, options = {}) {
     } catch (err) {
         console.error('Slack投稿中に例外が発生:', err.message);
         return {
-            content: [{ type: 'text', text: `Slack送信エラー: 質問の送信中に例外が発生しました: ${err.message}` }],
+            content: [
+                {
+                    type: 'text',
+                    text: `Slack送信エラー: 質問の送信中に例外が発生しました: ${err.message}`,
+                },
+            ],
             isError: true,
         };
     }
     if (!questionTs) {
         return {
-            content: [{ type: 'text', text: 'Slack送信失敗: 質問の送信に失敗しました（投稿結果が取得できませんでした）。' }],
+            content: [
+                {
+                    type: 'text',
+                    text: 'Slack送信失敗: 質問の送信に失敗しました（投稿結果が取得できませんでした）。',
+                },
+            ],
             isError: true,
         };
     }
@@ -64,19 +87,29 @@ export async function handleAskHuman(question, context, options = {}) {
     } catch (err) {
         console.error('Slack返信待機中に例外が発生:', err.message);
         return {
-            content: [{ type: 'text', text: `Slack待機エラー: 返信の待機中に例外が発生しました: ${err.message}` }],
+            content: [
+                {
+                    type: 'text',
+                    text: `Slack待機エラー: 返信の待機中に例外が発生しました: ${err.message}`,
+                },
+            ],
             isError: true,
         };
     }
 
     if (!reply) {
         return {
-            content: [{ type: 'text', text: `タイムアウト: 質問はSlackに送信済みですが、${Math.floor(timeoutMs / 60_000)}分以内に返信がありませんでした。` }]
+            content: [
+                {
+                    type: 'text',
+                    text: `タイムアウト: 質問はSlackに送信済みですが、${Math.floor(timeoutMs / 60_000)}分以内に返信がありませんでした。`,
+                },
+            ],
         };
     }
 
     return {
-        content: [{ type: 'text', text: reply.text }]
+        content: [{ type: 'text', text: reply.text }],
     };
 }
 
@@ -86,28 +119,31 @@ export async function handleAskHuman(question, context, options = {}) {
 export function createServer(deps = {}) {
     const server = new Server(
         { name: 'slack-human-interaction', version: '1.0.0' },
-        { capabilities: { tools: {} } }
+        { capabilities: { tools: {} } },
     );
 
     server.setRequestHandler(ListToolsRequestSchema, async () => ({
-        tools: [{
-            name: 'ask_human',
-            description: 'Slack経由でユーザーに質問し、回答を待つ。仕様の確認、設計判断、曖昧な要件の明確化などに使用。',
-            inputSchema: {
-                type: 'object',
-                properties: {
-                    question: {
-                        type: 'string',
-                        description: '質問内容',
+        tools: [
+            {
+                name: 'ask_human',
+                description:
+                    'Slack経由でユーザーに質問し、回答を待つ。仕様の確認、設計判断、曖昧な要件の明確化などに使用。',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        question: {
+                            type: 'string',
+                            description: '質問内容',
+                        },
+                        context: {
+                            type: 'string',
+                            description: '質問の背景・選択肢など（任意）',
+                        },
                     },
-                    context: {
-                        type: 'string',
-                        description: '質問の背景・選択肢など（任意）',
-                    },
+                    required: ['question'],
                 },
-                required: ['question'],
             },
-        }],
+        ],
     }));
 
     server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -117,7 +153,9 @@ export function createServer(deps = {}) {
         }
 
         return {
-            content: [{ type: 'text', text: `Unknown tool: ${request.params.name}` }],
+            content: [
+                { type: 'text', text: `Unknown tool: ${request.params.name}` },
+            ],
             isError: true,
         };
     });

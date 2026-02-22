@@ -1,13 +1,15 @@
 {
-  "mcpServers": {
-    "slack-human": {
-      "command": "node",
-      "args": ["<SCRIPT_DIR>/mcp-servers/slack-human-interaction/index.js"],
-      "env": {
-        "SLACK_BOT_TOKEN": "<SLACK_BOT_TOKEN>",
-        "SLACK_CHANNEL": "<SLACK_CHANNEL>",
-        "SLACK_THREAD_TS": "<SLACK_THREAD_TS>"
-      }
+    "mcpServers": {
+        "slack-human": {
+            "command": "node",
+            "args": [
+                "<SCRIPT_DIR>/mcp-servers/slack-human-interaction/index.js"
+            ],
+            "env": {
+                "SLACK_BOT_TOKEN": "<SLACK_BOT_TOKEN>",
+                "SLACK_CHANNEL": "<SLACK_CHANNEL>",
+                "SLACK_THREAD_TS": "<SLACK_THREAD_TS>"
+            }
+        }
     }
-  }
 }
