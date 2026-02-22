@@ -5,7 +5,11 @@ import {
     CallToolRequestSchema,
     ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { postToSlack, waitForSlackReply } from '../../lib/slack.js';
+import {
+    formatMention,
+    postToSlack,
+    waitForSlackReply,
+} from '../../lib/slack.js';
 
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000; // 30分
 
@@ -45,8 +49,9 @@ export async function handleAskHuman(question, context, options = {}) {
         };
     }
 
-    // 質問メッセージを組み立て
-    let message = `❓ *Claude Codeからの質問*\n\n${question}`;
+    // 質問メッセージを組み立て（オーナーへのメンション付き）
+    const mention = formatMention(options.ownerSlackMemberId);
+    let message = `${mention}❓ *Claude Codeからの質問*\n\n${question}`;
     if (context) {
         message += `\n\n📋 *背景・補足*\n${context}`;
     }

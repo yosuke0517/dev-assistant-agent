@@ -1,5 +1,44 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { waitForSlackReply } from './lib/slack.js';
+import { formatMention, waitForSlackReply } from './lib/slack.js';
+
+describe('formatMention', () => {
+    let originalOwner;
+
+    beforeEach(() => {
+        originalOwner = process.env.OWNER_SLACK_MEMBER_ID;
+    });
+
+    afterEach(() => {
+        if (originalOwner !== undefined) {
+            process.env.OWNER_SLACK_MEMBER_ID = originalOwner;
+        } else {
+            delete process.env.OWNER_SLACK_MEMBER_ID;
+        }
+    });
+
+    it('引数で渡されたメンバーIDからメンション文字列を生成する', () => {
+        expect(formatMention('U12345678')).toBe('<@U12345678> ');
+    });
+
+    it('環境変数からメンバーIDを取得してメンション文字列を生成する', () => {
+        process.env.OWNER_SLACK_MEMBER_ID = 'U99999999';
+        expect(formatMention()).toBe('<@U99999999> ');
+    });
+
+    it('引数が環境変数より優先される', () => {
+        process.env.OWNER_SLACK_MEMBER_ID = 'U99999999';
+        expect(formatMention('U11111111')).toBe('<@U11111111> ');
+    });
+
+    it('メンバーIDが未設定の場合は空文字列を返す', () => {
+        delete process.env.OWNER_SLACK_MEMBER_ID;
+        expect(formatMention()).toBe('');
+    });
+
+    it('メンバーIDが空文字列の場合は空文字列を返す', () => {
+        expect(formatMention('')).toBe('');
+    });
+});
 
 describe('waitForSlackReply', () => {
     let originalToken;

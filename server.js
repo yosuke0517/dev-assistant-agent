@@ -1,9 +1,9 @@
 import 'dotenv/config';
 import express from 'express';
 import pty from 'node-pty';
-import { postToSlack, waitForSlackReply } from './lib/slack.js';
+import { formatMention, postToSlack, waitForSlackReply } from './lib/slack.js';
 
-export { postToSlack, waitForSlackReply };
+export { formatMention, postToSlack, waitForSlackReply };
 
 const app = express();
 app.use(express.urlencoded({ extended: true }));
@@ -195,8 +195,9 @@ export class InteractiveHandler {
             };
         }
 
+        const mention = formatMention();
         const question = [
-            `⚠️ *エラーが発生しました*`,
+            `${mention}⚠️ *エラーが発生しました*`,
             '```',
             errorSummary.substring(0, 500),
             '```',
@@ -514,9 +515,10 @@ app.post('/do', async (req, res) => {
         const retryInfo = attempt > 1 ? ` (試行回数: ${attempt})` : '';
 
         try {
+            const mention = formatMention();
             await postToSlack(
                 channelId,
-                `${lastExitCode === 0 ? '✅' : '❌'} *${issueLabel}* の対応が${lastExitCode === 0 ? '完了' : '終了'}しました！ (Exit Code: ${lastExitCode})${retryInfo}${prMessage}`,
+                `${mention}${lastExitCode === 0 ? '✅' : '❌'} *${issueLabel}* の対応が${lastExitCode === 0 ? '完了' : '終了'}しました！ (Exit Code: ${lastExitCode})${retryInfo}${prMessage}`,
                 parentTs,
             );
         } catch (err) {
