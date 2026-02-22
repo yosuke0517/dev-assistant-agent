@@ -1,5 +1,8 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { handleAskHuman, createServer } from './mcp-servers/slack-human-interaction/index.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+    createServer,
+    handleAskHuman,
+} from './mcp-servers/slack-human-interaction/index.js';
 
 describe('handleAskHuman', () => {
     let originalChannel;
@@ -38,27 +41,40 @@ describe('handleAskHuman', () => {
         process.env.SLACK_THREAD_TS = '9999.0000';
 
         const mockPost = vi.fn().mockResolvedValue('1234.5680');
-        const mockWaitReply = vi.fn().mockResolvedValue({ text: 'はい', user: 'U123' });
+        const mockWaitReply = vi
+            .fn()
+            .mockResolvedValue({ text: 'はい', user: 'U123' });
 
         const result = await handleAskHuman('質問です', null, {
             postFn: mockPost,
             waitReplyFn: mockWaitReply,
         });
 
-        expect(mockPost).toHaveBeenCalledWith('C_ENV_TEST', expect.any(String), '9999.0000');
+        expect(mockPost).toHaveBeenCalledWith(
+            'C_ENV_TEST',
+            expect.any(String),
+            '9999.0000',
+        );
         expect(result.content[0].text).toBe('はい');
     });
 
     it('質問をSlackに投稿し、ユーザーの回答を返す', async () => {
         const mockPost = vi.fn().mockResolvedValue('1234.5680');
-        const mockWaitReply = vi.fn().mockResolvedValue({ text: 'パターンAでお願いします', user: 'U123' });
-
-        const result = await handleAskHuman('どちらのパターンで実装しますか？', 'A: シンプル、B: 高機能', {
-            channel: 'C123456',
-            threadTs: '1234.5678',
-            postFn: mockPost,
-            waitReplyFn: mockWaitReply,
+        const mockWaitReply = vi.fn().mockResolvedValue({
+            text: 'パターンAでお願いします',
+            user: 'U123',
         });
+
+        const result = await handleAskHuman(
+            'どちらのパターンで実装しますか？',
+            'A: シンプル、B: 高機能',
+            {
+                channel: 'C123456',
+                threadTs: '1234.5678',
+                postFn: mockPost,
+                waitReplyFn: mockWaitReply,
+            },
+        );
 
         expect(result.content[0].text).toBe('パターンAでお願いします');
 
@@ -70,14 +86,20 @@ describe('handleAskHuman', () => {
 
     it('質問メッセージにquestionとcontextが含まれる', async () => {
         const mockPost = vi.fn().mockResolvedValue('1234.5680');
-        const mockWaitReply = vi.fn().mockResolvedValue({ text: 'OK', user: 'U123' });
+        const mockWaitReply = vi
+            .fn()
+            .mockResolvedValue({ text: 'OK', user: 'U123' });
 
-        await handleAskHuman('DBスキーマを変更してよいですか？', '既存テーブルのカラム追加が必要です', {
-            channel: 'C123456',
-            threadTs: '1234.5678',
-            postFn: mockPost,
-            waitReplyFn: mockWaitReply,
-        });
+        await handleAskHuman(
+            'DBスキーマを変更してよいですか？',
+            '既存テーブルのカラム追加が必要です',
+            {
+                channel: 'C123456',
+                threadTs: '1234.5678',
+                postFn: mockPost,
+                waitReplyFn: mockWaitReply,
+            },
+        );
 
         const postedMessage = mockPost.mock.calls[0][1];
         expect(postedMessage).toContain('DBスキーマを変更してよいですか？');
@@ -87,7 +109,9 @@ describe('handleAskHuman', () => {
 
     it('contextが省略されても動作する', async () => {
         const mockPost = vi.fn().mockResolvedValue('1234.5680');
-        const mockWaitReply = vi.fn().mockResolvedValue({ text: 'はい', user: 'U123' });
+        const mockWaitReply = vi
+            .fn()
+            .mockResolvedValue({ text: 'はい', user: 'U123' });
 
         const result = await handleAskHuman('進めてよいですか？', undefined, {
             channel: 'C123456',
@@ -133,7 +157,9 @@ describe('handleAskHuman', () => {
 
     it('waitReplyFnにtimeoutMsが渡される', async () => {
         const mockPost = vi.fn().mockResolvedValue('1234.5680');
-        const mockWaitReply = vi.fn().mockResolvedValue({ text: 'OK', user: 'U123' });
+        const mockWaitReply = vi
+            .fn()
+            .mockResolvedValue({ text: 'OK', user: 'U123' });
 
         await handleAskHuman('質問', null, {
             channel: 'C123456',
@@ -148,13 +174,15 @@ describe('handleAskHuman', () => {
             'C123456',
             '1234.5678',
             '1234.5680',
-            { timeoutMs: 60_000 }
+            { timeoutMs: 60_000 },
         );
     });
 
     it('スレッドTsを正しく指定してSlackに投稿する', async () => {
         const mockPost = vi.fn().mockResolvedValue('1234.5690');
-        const mockWaitReply = vi.fn().mockResolvedValue({ text: '了解', user: 'U123' });
+        const mockWaitReply = vi
+            .fn()
+            .mockResolvedValue({ text: '了解', user: 'U123' });
 
         await handleAskHuman('テスト', null, {
             channel: 'C999',
@@ -164,7 +192,11 @@ describe('handleAskHuman', () => {
         });
 
         // postFnの引数: (channel, message, threadTs)
-        expect(mockPost).toHaveBeenCalledWith('C999', expect.any(String), '1234.5678');
+        expect(mockPost).toHaveBeenCalledWith(
+            'C999',
+            expect.any(String),
+            '1234.5678',
+        );
     });
 
     it('空の質問文字列の場合はエラーを返す', async () => {
@@ -213,7 +245,9 @@ describe('handleAskHuman', () => {
 
     it('waitReplyFnが例外をスローした場合はフォールバックメッセージを返す', async () => {
         const mockPost = vi.fn().mockResolvedValue('1234.5680');
-        const mockWaitReply = vi.fn().mockRejectedValue(new Error('Connection lost'));
+        const mockWaitReply = vi
+            .fn()
+            .mockRejectedValue(new Error('Connection lost'));
 
         const result = await handleAskHuman('質問です', null, {
             channel: 'C123456',

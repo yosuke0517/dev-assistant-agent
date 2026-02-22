@@ -1,24 +1,28 @@
 {
-  "name": "dev-assistant-agent",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "scripts": {
-    "test": "vitest",
-    "postinstall": "chmod +x node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper 2>/dev/null || true"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "module",
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.26.0",
-    "dotenv": "^16.4.0",
-    "express": "^5.2.1",
-    "node-fetch": "^3.3.2",
-    "node-pty": "^1.1.0"
-  },
-  "devDependencies": {
-    "vitest": "^3.0.0"
-  }
+    "name": "dev-assistant-agent",
+    "version": "1.0.0",
+    "description": "",
+    "main": "index.js",
+    "scripts": {
+        "test": "vitest",
+        "lint": "biome check .",
+        "lint:fix": "biome check --write .",
+        "format": "biome format --write .",
+        "postinstall": "chmod +x node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper 2>/dev/null || true"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "type": "module",
+    "dependencies": {
+        "@modelcontextprotocol/sdk": "^1.26.0",
+        "dotenv": "^16.4.0",
+        "express": "^5.2.1",
+        "node-fetch": "^3.3.2",
+        "node-pty": "^1.1.0"
+    },
+    "devDependencies": {
+        "@biomejs/biome": "2.4.4",
+        "vitest": "^3.0.0"
+    }
 }

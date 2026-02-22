@@ -1,7 +1,7 @@
-import { describe, it, expect } from 'vitest';
-import { execSync } from 'child_process';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { execSync } from 'node:child_process';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { describe, expect, it } from 'vitest';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -11,7 +11,7 @@ describe('stealth-run.sh', () => {
 
     it('スクリプトファイルが存在することを確認', async () => {
         // シェルスクリプトファイルの存在チェック
-        const fs = await import('fs');
+        const fs = await import('node:fs');
         expect(fs.existsSync(scriptPath)).toBe(true);
     });
 
@@ -20,10 +20,13 @@ describe('stealth-run.sh', () => {
         const dummyIssueId = 'PROJ-123';
 
         try {
-            execSync(`bash "${scriptPath}" "${nonExistentFolder}" "${dummyIssueId}"`, {
-                encoding: 'utf8',
-                stdio: 'pipe'
-            });
+            execSync(
+                `bash "${scriptPath}" "${nonExistentFolder}" "${dummyIssueId}"`,
+                {
+                    encoding: 'utf8',
+                    stdio: 'pipe',
+                },
+            );
             // 成功した場合はテスト失敗
             expect(false).toBe(true);
         } catch (error) {
@@ -35,10 +38,13 @@ describe('stealth-run.sh', () => {
     });
 
     it('agentキーワードの場合、dev-assistant-agentディレクトリが存在する', () => {
-        const fs = require ? require('fs') : null;
+        const _fs = require ? require('node:fs') : null;
         // ESM環境でのチェック
-        const agentProjectPath = process.env.AGENT_PROJECT_PATH || '/Users/takeuchiyosuke/work/dev-assistant-agent';
-        const workspaceRoot = process.env.WORKSPACE_ROOT || '/Users/takeuchiyosuke/work/circus';
+        const agentProjectPath =
+            process.env.AGENT_PROJECT_PATH ||
+            '/Users/takeuchiyosuke/work/dev-assistant-agent';
+        const workspaceRoot =
+            process.env.WORKSPACE_ROOT || '/Users/takeuchiyosuke/work/circus';
         const checkScript = `
             FOLDER_NAME="agent"
             AGENT_PROJECT_PATH="${agentProjectPath}"
@@ -62,15 +68,15 @@ describe('stealth-run.sh', () => {
 
     it('ディレクトリが存在する場合、最初のチェックは通過する（git操作前まで）', () => {
         // 実際に存在するディレクトリ（カレントディレクトリ）を使用
-        const existingFolder = '.';
-        const dummyIssueId = 'PROJ-123';
+        const _existingFolder = '.';
+        const _dummyIssueId = 'PROJ-123';
 
         // このテストでは実際に git checkout や claude を実行しないため、
         // スクリプトの一部だけを確認する簡易的なテストとする
         // 完全な実行はモック化が必要なため、ここでは省略
 
         // 代わりに、存在チェックのロジックだけを確認
-        const checkScript = `
+        const _checkScript = `
             WORKSPACE_ROOT="${process.env.WORKSPACE_ROOT || '/Users/takeuchiyosuke/work/circus'}"
             TARGET_PATH="$WORKSPACE_ROOT/."
             if [ -d "$TARGET_PATH" ]; then
