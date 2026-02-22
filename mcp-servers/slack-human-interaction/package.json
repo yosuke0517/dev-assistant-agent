@@ -1,11 +1,11 @@
 {
-  "name": "slack-human-interaction",
-  "version": "1.0.0",
-  "description": "MCP Server for asking questions to humans via Slack",
-  "type": "module",
-  "main": "index.js",
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.26.0",
-    "node-fetch": "^3.3.2"
-  }
+    "name": "slack-human-interaction",
+    "version": "1.0.0",
+    "description": "MCP Server for asking questions to humans via Slack",
+    "type": "module",
+    "main": "index.js",
+    "dependencies": {
+        "@modelcontextprotocol/sdk": "^1.26.0",
+        "node-fetch": "^3.3.2"
+    }
 }

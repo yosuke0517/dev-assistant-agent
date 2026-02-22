@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { waitForSlackReply } from './lib/slack.js';
 
 describe('waitForSlackReply', () => {
@@ -18,17 +18,24 @@ describe('waitForSlackReply', () => {
     });
 
     it('conversations.replies が ok:false を返した場合に console.error を呼ぶ', async () => {
-        const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const consoleSpy = vi
+            .spyOn(console, 'error')
+            .mockImplementation(() => {});
 
         const mockFetch = vi.fn().mockResolvedValue({
             json: async () => ({ ok: false, error: 'missing_scope' }),
         });
 
-        const result = await waitForSlackReply('C123', '1000.0000', '1000.0001', {
-            intervalMs: 10,
-            timeoutMs: 50,
-            fetchFn: mockFetch,
-        });
+        const result = await waitForSlackReply(
+            'C123',
+            '1000.0000',
+            '1000.0001',
+            {
+                intervalMs: 10,
+                timeoutMs: 50,
+                fetchFn: mockFetch,
+            },
+        );
 
         expect(result).toBeNull();
         expect(consoleSpy).toHaveBeenCalledWith(
@@ -38,14 +45,16 @@ describe('waitForSlackReply', () => {
             'C123',
             'ts:',
             '1000.0000',
-            ')'
+            ')',
         );
 
         consoleSpy.mockRestore();
     });
 
     it('APIエラーが複数回発生しても console.error は1回だけ呼ばれる', async () => {
-        const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const consoleSpy = vi
+            .spyOn(console, 'error')
+            .mockImplementation(() => {});
 
         const mockFetch = vi.fn().mockResolvedValue({
             json: async () => ({ ok: false, error: 'missing_scope' }),
@@ -58,7 +67,7 @@ describe('waitForSlackReply', () => {
         });
 
         const apiErrorCalls = consoleSpy.mock.calls.filter(
-            args => args[0] === 'Slack conversations.replies APIエラー:'
+            (args) => args[0] === 'Slack conversations.replies APIエラー:',
         );
         expect(apiErrorCalls).toHaveLength(1);
 
@@ -66,7 +75,9 @@ describe('waitForSlackReply', () => {
     });
 
     it('APIエラー発生後のタイムアウトログにAPIエラーの旨が含まれる', async () => {
-        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const errorSpy = vi
+            .spyOn(console, 'error')
+            .mockImplementation(() => {});
         const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
         const mockFetch = vi.fn().mockResolvedValue({
@@ -80,7 +91,7 @@ describe('waitForSlackReply', () => {
         });
 
         expect(logSpy).toHaveBeenCalledWith(
-            expect.stringContaining('APIエラーが発生していたため')
+            expect.stringContaining('APIエラーが発生していたため'),
         );
 
         errorSpy.mockRestore();
@@ -110,26 +121,35 @@ describe('waitForSlackReply', () => {
         const mockFetch = vi.fn().mockResolvedValue({
             json: async () => ({
                 ok: true,
-                messages: [
-                    { ts: '1000.0002', text: '了解です', user: 'U999' },
-                ],
+                messages: [{ ts: '1000.0002', text: '了解です', user: 'U999' }],
             }),
         });
 
-        const result = await waitForSlackReply('C123', '1000.0000', '1000.0001', {
-            intervalMs: 10,
-            timeoutMs: 5000,
-            fetchFn: mockFetch,
-        });
+        const result = await waitForSlackReply(
+            'C123',
+            '1000.0000',
+            '1000.0001',
+            {
+                intervalMs: 10,
+                timeoutMs: 5000,
+                fetchFn: mockFetch,
+            },
+        );
 
         expect(result).toEqual({ text: '了解です', user: 'U999' });
     });
 
     it('SLACK_BOT_TOKEN 未設定の場合は null を返す', async () => {
         delete process.env.SLACK_BOT_TOKEN;
-        const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const consoleSpy = vi
+            .spyOn(console, 'error')
+            .mockImplementation(() => {});
 
-        const result = await waitForSlackReply('C123', '1000.0000', '1000.0001');
+        const result = await waitForSlackReply(
+            'C123',
+            '1000.0000',
+            '1000.0001',
+        );
 
         expect(result).toBeNull();
         expect(consoleSpy).toHaveBeenCalledWith('SLACK_BOT_TOKEN 未設定');
