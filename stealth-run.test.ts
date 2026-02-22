@@ -96,7 +96,7 @@ describe('stealth-run.sh', () => {
         const tmpDir = `/tmp/finegate-test-basebranch-${Date.now()}`;
         try {
             execSync(
-                `mkdir -p "${tmpDir}" && cd "${tmpDir}" && git init && git commit --allow-empty -m "init"`,
+                `mkdir -p "${tmpDir}" && cd "${tmpDir}" && git init && git config user.name "test" && git config user.email "test@test.com" && git commit --allow-empty -m "init"`,
                 { encoding: 'utf8', stdio: 'pipe' },
             );
             // stealth-run.shを存在しないブランチ指定で実行
