@@ -20,15 +20,16 @@ app.use(express.json());
 interface ParsedInput {
     folder: string;
     issueId: string | undefined;
+    baseBranch: string | undefined;
 }
 
 /**
- * 入力テキストをフォルダ名と課題IDに分割
- * 例: "circus_agent_ecosystem RA_DEV-81" -> { folder, issueId }
+ * 入力テキストをフォルダ名・課題ID・ベースブランチに分割
+ * 例: "circus_backend RA_DEV-81 develop" -> { folder, issueId, baseBranch }
  */
 export function parseInput(rawText: string): ParsedInput {
     const parts = rawText.split(/[,、 ]+/);
-    return { folder: parts[0], issueId: parts[1] };
+    return { folder: parts[0], issueId: parts[1], baseBranch: parts[2] };
 }
 
 function timestamp(): string {
@@ -356,6 +357,7 @@ export function spawnWorker(
     issueId: string,
     tracker: ProgressTracker | null,
     extraPrompt: string | null = null,
+    baseBranch: string | null = null,
 ): Promise<SpawnWorkerResult> {
     return new Promise((resolve) => {
         // Claude Code内から起動された場合のネスト検出を回避
@@ -365,6 +367,7 @@ export function spawnWorker(
         delete childEnv.CLAUDE_CODE_ENTRYPOINT;
 
         const args = ['./stealth-run.sh', folder, issueId];
+        if (baseBranch) args.push(baseBranch);
         if (extraPrompt) args.push(extraPrompt);
 
         // worktree パスを生成して stealth-run.sh に渡す
@@ -476,7 +479,7 @@ export function extractErrorSummary(output: string): string {
 }
 
 app.post('/do', async (req: Request, res: Response) => {
-    const { folder, issueId } = parseInput(req.body.text || '');
+    const { folder, issueId, baseBranch } = parseInput(req.body.text || '');
     const channelId = req.body.channel_id;
 
     if (!folder || !issueId) {
@@ -534,6 +537,7 @@ app.post('/do', async (req: Request, res: Response) => {
             issueId,
             tracker,
             extraPrompt,
+            baseBranch || null,
         );
         lastExitCode = exitCode;
         lastOutput = output;
