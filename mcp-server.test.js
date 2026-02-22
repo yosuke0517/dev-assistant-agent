@@ -23,14 +23,14 @@ describe('handleAskHuman', () => {
         }
     });
 
-    it('Slack未設定の場合はフォールバックメッセージを返す', async () => {
+    it('Slack未設定の場合はエラーを返す', async () => {
         const result = await handleAskHuman('テスト質問', null, {
             channel: '',
             threadTs: '',
         });
 
         expect(result.content[0].text).toContain('Slack未設定');
-        expect(result.content[0].text).toContain('自己判断で進めてください');
+        expect(result.isError).toBe(true);
     });
 
     it('環境変数からチャンネル・スレッド情報を取得できる', async () => {
@@ -102,7 +102,7 @@ describe('handleAskHuman', () => {
         expect(result.content[0].text).toBe('はい');
     });
 
-    it('Slack投稿失敗時はフォールバックメッセージを返す', async () => {
+    it('Slack投稿失敗時はエラーを返す', async () => {
         const mockPost = vi.fn().mockResolvedValue(null);
 
         const result = await handleAskHuman('質問', null, {
@@ -111,11 +111,11 @@ describe('handleAskHuman', () => {
             postFn: mockPost,
         });
 
-        expect(result.content[0].text).toContain('質問送信に失敗');
-        expect(result.content[0].text).toContain('自己判断で進めてください');
+        expect(result.content[0].text).toContain('送信に失敗');
+        expect(result.isError).toBe(true);
     });
 
-    it('タイムアウト時はフォールバックメッセージを返す', async () => {
+    it('タイムアウト時はタイムアウトメッセージを返す（isErrorなし）', async () => {
         const mockPost = vi.fn().mockResolvedValue('1234.5680');
         const mockWaitReply = vi.fn().mockResolvedValue(null);
 
@@ -128,7 +128,7 @@ describe('handleAskHuman', () => {
         });
 
         expect(result.content[0].text).toContain('タイムアウト');
-        expect(result.content[0].text).toContain('自己判断で進めてください');
+        expect(result.isError).toBeUndefined();
     });
 
     it('waitReplyFnにtimeoutMsが渡される', async () => {
@@ -197,7 +197,7 @@ describe('handleAskHuman', () => {
         expect(result.isError).toBe(true);
     });
 
-    it('postFnが例外をスローした場合はフォールバックメッセージを返す', async () => {
+    it('postFnが例外をスローした場合はエラーを返す', async () => {
         const mockPost = vi.fn().mockRejectedValue(new Error('Network error'));
 
         const result = await handleAskHuman('質問です', null, {
@@ -206,12 +206,12 @@ describe('handleAskHuman', () => {
             postFn: mockPost,
         });
 
-        expect(result.content[0].text).toContain('エラーが発生しました');
+        expect(result.content[0].text).toContain('例外が発生しました');
         expect(result.content[0].text).toContain('Network error');
-        expect(result.content[0].text).toContain('自己判断で進めてください');
+        expect(result.isError).toBe(true);
     });
 
-    it('waitReplyFnが例外をスローした場合はフォールバックメッセージを返す', async () => {
+    it('waitReplyFnが例外をスローした場合はエラーを返す', async () => {
         const mockPost = vi.fn().mockResolvedValue('1234.5680');
         const mockWaitReply = vi.fn().mockRejectedValue(new Error('Connection lost'));
 
@@ -222,9 +222,9 @@ describe('handleAskHuman', () => {
             waitReplyFn: mockWaitReply,
         });
 
-        expect(result.content[0].text).toContain('エラーが発生しました');
+        expect(result.content[0].text).toContain('例外が発生しました');
         expect(result.content[0].text).toContain('Connection lost');
-        expect(result.content[0].text).toContain('自己判断で進めてください');
+        expect(result.isError).toBe(true);
     });
 });
 

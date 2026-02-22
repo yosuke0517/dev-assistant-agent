@@ -60,6 +60,29 @@ describe('stealth-run.sh', () => {
         expect(result.trim()).toContain(`exists:${agentProjectPath}`);
     });
 
+    it('CLAUDE.mdファイルが存在し、ask_humanの使用指示が含まれる', async () => {
+        const fs = await import('fs');
+        const claudeMdPath = path.join(__dirname, 'CLAUDE.md');
+        expect(fs.existsSync(claudeMdPath)).toBe(true);
+
+        const content = fs.readFileSync(claudeMdPath, 'utf8');
+        expect(content).toContain('ask_human');
+        expect(content).toContain('AskUserQuestion');
+    });
+
+    it('スクリプトに --disallowedTools AskUserQuestion が含まれる', async () => {
+        const fs = await import('fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        expect(content).toContain('--disallowedTools AskUserQuestion');
+    });
+
+    it('プロンプトに ask_human MCPツール使用の指示が含まれる', async () => {
+        const fs = await import('fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        expect(content).toContain('ask_human MCPツールを使用して');
+        expect(content).toContain('AskUserQuestion は使用禁止');
+    });
+
     it('ディレクトリが存在する場合、最初のチェックは通過する（git操作前まで）', () => {
         // 実際に存在するディレクトリ（カレントディレクトリ）を使用
         const existingFolder = '.';

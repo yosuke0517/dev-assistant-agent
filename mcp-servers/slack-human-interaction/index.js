@@ -27,7 +27,8 @@ export async function handleAskHuman(question, context, options = {}) {
 
     if (!channel || !threadTs) {
         return {
-            content: [{ type: 'text', text: 'Slack未設定のため、ユーザーへの質問ができません。自己判断で進めてください。' }]
+            content: [{ type: 'text', text: 'Slack未設定エラー: SLACK_CHANNEL または SLACK_THREAD_TS が設定されていないため、ユーザーへの質問ができません。' }],
+            isError: true,
         };
     }
 
@@ -45,12 +46,14 @@ export async function handleAskHuman(question, context, options = {}) {
     } catch (err) {
         console.error('Slack投稿中に例外が発生:', err.message);
         return {
-            content: [{ type: 'text', text: `Slackへの質問送信中にエラーが発生しました: ${err.message}。自己判断で進めてください。` }]
+            content: [{ type: 'text', text: `Slack送信エラー: 質問の送信中に例外が発生しました: ${err.message}` }],
+            isError: true,
         };
     }
     if (!questionTs) {
         return {
-            content: [{ type: 'text', text: 'Slackへの質問送信に失敗しました。自己判断で進めてください。' }]
+            content: [{ type: 'text', text: 'Slack送信失敗: 質問の送信に失敗しました（投稿結果が取得できませんでした）。' }],
+            isError: true,
         };
     }
 
@@ -61,13 +64,14 @@ export async function handleAskHuman(question, context, options = {}) {
     } catch (err) {
         console.error('Slack返信待機中に例外が発生:', err.message);
         return {
-            content: [{ type: 'text', text: `返信の待機中にエラーが発生しました: ${err.message}。自己判断で進めてください。` }]
+            content: [{ type: 'text', text: `Slack待機エラー: 返信の待機中に例外が発生しました: ${err.message}` }],
+            isError: true,
         };
     }
 
     if (!reply) {
         return {
-            content: [{ type: 'text', text: 'タイムアウトしました。ユーザーからの回答が得られませんでした。自己判断で進めてください。' }]
+            content: [{ type: 'text', text: `タイムアウト: 質問はSlackに送信済みですが、${Math.floor(timeoutMs / 60_000)}分以内に返信がありませんでした。` }]
         };
     }
 
