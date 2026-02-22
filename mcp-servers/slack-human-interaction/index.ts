@@ -6,6 +6,7 @@ import {
     ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import {
+    type FetchFn,
     formatMention,
     postToSlack,
     waitForSlackReply,
@@ -13,11 +14,34 @@ import {
 
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000; // 30分
 
+type PostFn = typeof postToSlack;
+type WaitReplyFn = typeof waitForSlackReply;
+
+interface McpToolResult {
+    [key: string]: unknown;
+    content: Array<{ type: string; text: string }>;
+    isError?: boolean;
+}
+
+export interface HandleAskHumanOptions {
+    channel?: string;
+    threadTs?: string;
+    postFn?: PostFn;
+    waitReplyFn?: WaitReplyFn;
+    timeoutMs?: number;
+    ownerSlackMemberId?: string;
+    fetchFn?: FetchFn;
+}
+
 /**
  * ask_human ツールのハンドラー
  * Slack経由でユーザーに質問し、回答を待つ
  */
-export async function handleAskHuman(question, context, options = {}) {
+export async function handleAskHuman(
+    question: string | null,
+    context: string | null | undefined,
+    options: HandleAskHumanOptions = {},
+): Promise<McpToolResult> {
     const channel = options.channel ?? process.env.SLACK_CHANNEL;
     const threadTs = options.threadTs ?? process.env.SLACK_THREAD_TS;
     const postFn = options.postFn ?? postToSlack;
@@ -58,16 +82,16 @@ export async function handleAskHuman(question, context, options = {}) {
     message += `\n\n_回答をこのスレッドに返信してください（${Math.floor(timeoutMs / 60_000)}分以内）_`;
 
     // Slackに質問を投稿
-    let questionTs;
+    let questionTs: string | null;
     try {
         questionTs = await postFn(channel, message, threadTs);
-    } catch (err) {
-        console.error('Slack投稿中に例外が発生:', err.message);
+    } catch (err: unknown) {
+        console.error('Slack投稿中に例外が発生:', (err as Error).message);
         return {
             content: [
                 {
                     type: 'text',
-                    text: `Slack送信エラー: 質問の送信中に例外が発生しました: ${err.message}`,
+                    text: `Slack送信エラー: 質問の送信中に例外が発生しました: ${(err as Error).message}`,
                 },
             ],
             isError: true,
@@ -86,16 +110,16 @@ export async function handleAskHuman(question, context, options = {}) {
     }
 
     // ユーザーの返信を待機
-    let reply;
+    let reply: Awaited<ReturnType<typeof waitReplyFn>> | undefined;
     try {
         reply = await waitReplyFn(channel, threadTs, questionTs, { timeoutMs });
-    } catch (err) {
-        console.error('Slack返信待機中に例外が発生:', err.message);
+    } catch (err: unknown) {
+        console.error('Slack返信待機中に例外が発生:', (err as Error).message);
         return {
             content: [
                 {
                     type: 'text',
-                    text: `Slack待機エラー: 返信の待機中に例外が発生しました: ${err.message}`,
+                    text: `Slack待機エラー: 返信の待機中に例外が発生しました: ${(err as Error).message}`,
                 },
             ],
             isError: true,
@@ -121,7 +145,7 @@ export async function handleAskHuman(question, context, options = {}) {
 /**
  * MCP Server を作成して返す（テスト用にファクトリ関数として公開）
  */
-export function createServer(deps = {}) {
+export function createServer(deps: HandleAskHumanOptions = {}): Server {
     const server = new Server(
         { name: 'slack-human-interaction', version: '1.0.0' },
         { capabilities: { tools: {} } },
@@ -134,7 +158,7 @@ export function createServer(deps = {}) {
                 description:
                     'Slack経由でユーザーに質問し、回答を待つ。仕様の確認、設計判断、曖昧な要件の明確化などに使用。',
                 inputSchema: {
-                    type: 'object',
+                    type: 'object' as const,
                     properties: {
                         question: {
                             type: 'string',
@@ -153,7 +177,10 @@ export function createServer(deps = {}) {
 
     server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (request.params.name === 'ask_human') {
-            const { question, context } = request.params.arguments;
+            const { question, context } = request.params.arguments as {
+                question: string;
+                context?: string;
+            };
             return await handleAskHuman(question, context, deps);
         }
 

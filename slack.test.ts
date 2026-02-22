@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { formatMention, waitForSlackReply } from './lib/slack.js';
 
 describe('formatMention', () => {
-    let originalOwner;
+    let originalOwner: string | undefined;
 
     beforeEach(() => {
         originalOwner = process.env.OWNER_SLACK_MEMBER_ID;
@@ -41,7 +41,7 @@ describe('formatMention', () => {
 });
 
 describe('waitForSlackReply', () => {
-    let originalToken;
+    let originalToken: string | undefined;
 
     beforeEach(() => {
         originalToken = process.env.SLACK_BOT_TOKEN;

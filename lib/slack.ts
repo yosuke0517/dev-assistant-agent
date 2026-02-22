@@ -1,11 +1,25 @@
 import fetch from 'node-fetch';
 
+export type FetchFn = (
+    url: string | URL,
+    init?: Record<string, unknown>,
+) => Promise<{ json: () => Promise<Record<string, unknown>> }>;
+
+export interface SlackReply {
+    text: string;
+    user: string;
+}
+
+export interface WaitForSlackReplyOptions {
+    intervalMs?: number;
+    timeoutMs?: number;
+    fetchFn?: FetchFn;
+}
+
 /**
  * OWNER_SLACK_MEMBER_ID からSlackメンション文字列を生成する
- * @param {string} [memberId] - Slack Member ID（省略時は process.env から取得）
- * @returns {string} メンション文字列（例: "<@U12345678> "）、未設定の場合は空文字列
  */
-export function formatMention(memberId) {
+export function formatMention(memberId?: string): string {
     const id = memberId ?? process.env.OWNER_SLACK_MEMBER_ID;
     if (!id) return '';
     return `<@${id}> `;
@@ -13,21 +27,20 @@ export function formatMention(memberId) {
 
 /**
  * Slack chat.postMessage でメッセージ送信
- * @returns {Promise<string|null>} メッセージの ts (スレッドID) or null
  */
 export async function postToSlack(
-    channel,
-    text,
-    threadTs = null,
-    fetchFn = fetch,
-) {
+    channel: string,
+    text: string,
+    threadTs: string | null = null,
+    fetchFn: FetchFn = fetch as unknown as FetchFn,
+): Promise<string | null> {
     const token = process.env.SLACK_BOT_TOKEN;
     if (!token) {
         console.error('SLACK_BOT_TOKEN 未設定');
         return null;
     }
     try {
-        const body = {
+        const body: Record<string, string> = {
             channel,
             text,
             ...(threadTs && { thread_ts: threadTs }),
@@ -45,9 +58,9 @@ export async function postToSlack(
             console.error('Slack API エラー:', data.error);
             return null;
         }
-        return data.ts;
-    } catch (err) {
-        console.error('Slack 送信エラー:', err.message);
+        return data.ts as string;
+    } catch (err: unknown) {
+        console.error('Slack 送信エラー:', (err as Error).message);
         return null;
     }
 }
@@ -55,25 +68,17 @@ export async function postToSlack(
 /**
  * Slackスレッドへのユーザー返信をポーリングで待機する
  * botメッセージ送信後のユーザー返信のみ取得する
- * @param {string} channel - チャンネルID
- * @param {string} threadTs - スレッドのts
- * @param {string} afterTs - この時刻以降のメッセージのみ取得
- * @param {object} options - ポーリング設定
- * @param {number} options.intervalMs - ポーリング間隔(ms) default: 5000
- * @param {number} options.timeoutMs - タイムアウト(ms) default: 1800000 (30分)
- * @param {Function} options.fetchFn - fetch関数（テスト用DI）
- * @returns {Promise<{text: string, user: string}|null>} ユーザー返信 or null (タイムアウト)
  */
 export async function waitForSlackReply(
-    channel,
-    threadTs,
-    afterTs,
-    options = {},
-) {
+    channel: string,
+    threadTs: string,
+    afterTs: string,
+    options: WaitForSlackReplyOptions = {},
+): Promise<SlackReply | null> {
     const {
         intervalMs = 5_000,
         timeoutMs = 1_800_000,
-        fetchFn = fetch,
+        fetchFn = fetch as unknown as FetchFn,
     } = options;
     const token = process.env.SLACK_BOT_TOKEN;
     if (!token) {
@@ -101,8 +106,9 @@ export async function waitForSlackReply(
             );
             const data = await res.json();
             if (data.ok && data.messages) {
+                const messages = data.messages as Array<Record<string, string>>;
                 // bot自身のメッセージを除外し、afterTs以降のユーザーメッセージを探す
-                const userReply = data.messages.find(
+                const userReply = messages.find(
                     (m) => !m.bot_id && !m.app_id && m.ts > afterTs,
                 );
                 if (userReply) {
@@ -120,8 +126,8 @@ export async function waitForSlackReply(
                 );
                 apiErrorLogged = true;
             }
-        } catch (err) {
-            console.error('Slack返信取得エラー:', err.message);
+        } catch (err: unknown) {
+            console.error('Slack返信取得エラー:', (err as Error).message);
         }
 
         // 次のポーリングまで待機

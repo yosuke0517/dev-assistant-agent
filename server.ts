@@ -1,32 +1,78 @@
 import 'dotenv/config';
-import express from 'express';
+import express, { type Request, type Response } from 'express';
 import pty from 'node-pty';
-import { formatMention, postToSlack, waitForSlackReply } from './lib/slack.js';
+import {
+    type FetchFn,
+    formatMention,
+    postToSlack,
+    type SlackReply,
+    type WaitForSlackReplyOptions,
+    waitForSlackReply,
+} from './lib/slack.js';
 
 export { formatMention, postToSlack, waitForSlackReply };
+export type { FetchFn, SlackReply, WaitForSlackReplyOptions };
 
 const app = express();
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
+interface ParsedInput {
+    folder: string;
+    issueId: string | undefined;
+}
+
 /**
  * 入力テキストをフォルダ名と課題IDに分割
  * 例: "circus_agent_ecosystem RA_DEV-81" -> { folder, issueId }
  */
-export function parseInput(rawText) {
+export function parseInput(rawText: string): ParsedInput {
     const parts = rawText.split(/[,、 ]+/);
     return { folder: parts[0], issueId: parts[1] };
 }
 
-function timestamp() {
+function timestamp(): string {
     return `[${new Date().toLocaleString()}]`;
+}
+
+interface StreamEventBase {
+    type: string;
+    [key: string]: unknown;
+}
+
+interface ContentBlock {
+    type: string;
+    text?: string;
+    name?: string;
+    input?: Record<string, unknown>;
+    content?: string | unknown[];
+    is_error?: boolean;
+    tool_use_id?: string;
+}
+
+interface StreamMessage {
+    content?: ContentBlock[];
+}
+
+interface StreamEvent extends StreamEventBase {
+    session_id?: string;
+    tools?: string[];
+    message?: StreamMessage;
+    cost_usd?: number;
+    num_turns?: number;
+    duration_ms?: number;
+    result?: string;
+    subtype?: string;
 }
 
 /**
  * stream-json形式のイベントをパースしてログ出力する
  */
-export function processStreamEvent(line, tracker = null) {
-    let event;
+export function processStreamEvent(
+    line: string,
+    tracker: ProgressTracker | null = null,
+): StreamEvent | { type: 'raw'; text: string } {
+    let event: StreamEvent;
     try {
         event = JSON.parse(line);
     } catch {
@@ -59,7 +105,7 @@ export function processStreamEvent(line, tracker = null) {
                     );
                 } else if (block.type === 'tool_use') {
                     const inputSummary = summarizeToolInput(
-                        block.name,
+                        block.name ?? '',
                         block.input,
                     );
                     console.log(
@@ -113,18 +159,28 @@ export function processStreamEvent(line, tracker = null) {
     return event;
 }
 
+type PostFn = typeof postToSlack;
+
 /**
  * Slack進捗通知用のトラッカー
  * processStreamEventから呼ばれ、直近のアクティビティを蓄積する
  * 1分ごとのタイマーでSlackに送信し、バッファをリセット
  */
 export class ProgressTracker {
+    channel: string | null;
+    issueId: string;
+    threadTs: string | null;
+    intervalMs: number;
+    activities: string[];
+    timer: ReturnType<typeof setInterval> | null;
+    private _post: PostFn;
+
     constructor(
-        channel,
-        issueId,
-        threadTs,
+        channel: string | null,
+        issueId: string,
+        threadTs: string | null,
         intervalMs = 60_000,
-        postFn = postToSlack,
+        postFn: PostFn = postToSlack,
     ) {
         this.channel = channel;
         this.issueId = issueId;
@@ -135,12 +191,12 @@ export class ProgressTracker {
         this._post = postFn;
     }
 
-    start() {
+    start(): void {
         if (!this.channel) return;
         this.timer = setInterval(() => this._flush(), this.intervalMs);
     }
 
-    stop() {
+    stop(): void {
         if (this.timer) {
             clearInterval(this.timer);
             this.timer = null;
@@ -148,11 +204,11 @@ export class ProgressTracker {
     }
 
     /** イベントから進捗メッセージを追加 */
-    addActivity(message) {
+    addActivity(message: string): void {
         this.activities.push(message);
     }
 
-    async _flush() {
+    async _flush(): Promise<void> {
         if (!this.channel || this.activities.length === 0) return;
 
         // 直近のアクティビティをまとめて送信（最大10件）
@@ -163,10 +219,21 @@ export class ProgressTracker {
 
         try {
             await this._post(this.channel, text, this.threadTs);
-        } catch (err) {
-            console.error('進捗通知の送信に失敗:', err.message);
+        } catch (err: unknown) {
+            console.error('進捗通知の送信に失敗:', (err as Error).message);
         }
     }
+}
+
+interface InteractiveHandlerOptions {
+    postFn?: PostFn;
+    waitReplyFn?: typeof waitForSlackReply;
+    timeoutMs?: number;
+}
+
+interface UserDecision {
+    action: 'retry' | 'abort';
+    message: string;
 }
 
 /**
@@ -174,7 +241,17 @@ export class ProgressTracker {
  * processStreamEventと連携してエラーを自動検知する
  */
 export class InteractiveHandler {
-    constructor(channel, threadTs, options = {}) {
+    channel: string | null;
+    threadTs: string | null;
+    private _post: PostFn;
+    private _waitReply: typeof waitForSlackReply;
+    timeoutMs: number;
+
+    constructor(
+        channel: string | null,
+        threadTs: string | null,
+        options: InteractiveHandlerOptions = {},
+    ) {
         this.channel = channel;
         this.threadTs = threadTs;
         this._post = options.postFn || postToSlack;
@@ -184,10 +261,8 @@ export class InteractiveHandler {
 
     /**
      * エラー発生時にSlackでユーザーに確認を送り、返信を待つ
-     * @param {string} errorSummary - エラー内容のサマリー
-     * @returns {Promise<{action: 'retry'|'abort', message: string}>}
      */
-    async askUser(errorSummary) {
+    async askUser(errorSummary: string): Promise<UserDecision> {
         if (!this.channel || !this.threadTs) {
             return {
                 action: 'abort',
@@ -243,33 +318,45 @@ export class InteractiveHandler {
     }
 }
 
-function summarizeToolInput(toolName, input) {
+function summarizeToolInput(
+    toolName: string,
+    input?: Record<string, unknown>,
+): string {
     if (!input) return '';
     switch (toolName) {
         case 'Bash':
-            return `> ${input.command || ''}`.substring(0, 150);
+            return `> ${(input.command as string) || ''}`.substring(0, 150);
         case 'Read':
-            return `📄 ${input.file_path || ''}`;
+            return `📄 ${(input.file_path as string) || ''}`;
         case 'Edit':
-            return `✏️ ${input.file_path || ''}`;
+            return `✏️ ${(input.file_path as string) || ''}`;
         case 'Write':
-            return `📝 ${input.file_path || ''}`;
+            return `📝 ${(input.file_path as string) || ''}`;
         case 'Glob':
-            return `🔍 ${input.pattern || ''}`;
+            return `🔍 ${(input.pattern as string) || ''}`;
         case 'Grep':
-            return `🔎 "${input.pattern || ''}" in ${input.path || '.'}`;
+            return `🔎 "${(input.pattern as string) || ''}" in ${(input.path as string) || '.'}`;
         case 'Task':
-            return `🤖 ${input.description || ''}`;
+            return `🤖 ${(input.description as string) || ''}`;
         default:
             return JSON.stringify(input).substring(0, 100);
     }
 }
 
+interface SpawnWorkerResult {
+    exitCode: number;
+    output: string;
+}
+
 /**
  * Claude Codeワーカープロセスを起動し、完了を待つ
- * @returns {Promise<{exitCode: number, output: string}>}
  */
-export function spawnWorker(folder, issueId, tracker, extraPrompt = null) {
+export function spawnWorker(
+    folder: string,
+    issueId: string,
+    tracker: ProgressTracker | null,
+    extraPrompt: string | null = null,
+): Promise<SpawnWorkerResult> {
     return new Promise((resolve) => {
         // Claude Code内から起動された場合のネスト検出を回避
         const childEnv = { ...process.env };
@@ -305,12 +392,12 @@ export function spawnWorker(folder, issueId, tracker, extraPrompt = null) {
         let lineBuffer = '';
 
         // PTYからのstream-json(NDJSON)をリアルタイムでパース
-        worker.onData((data) => {
+        worker.onData((data: string) => {
             output += data;
             lineBuffer += data;
 
             const lines = lineBuffer.split('\n');
-            lineBuffer = lines.pop(); // 未完成の行はバッファに残す
+            lineBuffer = lines.pop() ?? ''; // 未完成の行はバッファに残す
 
             for (const line of lines) {
                 // PTYのANSIエスケープシーケンスを除去してからパース
@@ -323,7 +410,7 @@ export function spawnWorker(folder, issueId, tracker, extraPrompt = null) {
             }
         });
 
-        worker.onExit(({ exitCode }) => {
+        worker.onExit(({ exitCode }: { exitCode: number }) => {
             // バッファに残った最後の行を処理
             if (lineBuffer.trim()) {
                 const cleaned = lineBuffer
@@ -339,21 +426,21 @@ export function spawnWorker(folder, issueId, tracker, extraPrompt = null) {
 }
 
 /** 出力からエラーサマリーを抽出する */
-export function extractErrorSummary(output) {
+export function extractErrorSummary(output: string): string {
     // ANSIエスケープシーケンスを除去
     const cleaned = output.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
 
     // stream-jsonからエラーイベントを探す
     const lines = cleaned.split('\n');
-    const errors = [];
+    const errors: string[] = [];
 
     for (const line of lines) {
         try {
-            const event = JSON.parse(line.trim());
+            const event = JSON.parse(line.trim()) as StreamEvent;
             if (event.type === 'user' && event.message?.content) {
                 for (const block of event.message.content) {
                     if (block.is_error && block.content) {
-                        errors.push(block.content);
+                        errors.push(block.content as string);
                     }
                 }
             }
@@ -388,14 +475,13 @@ export function extractErrorSummary(output) {
     return '原因不明のエラーで終了しました（ログを確認してください）';
 }
 
-app.post('/do', async (req, res) => {
+app.post('/do', async (req: Request, res: Response) => {
     const { folder, issueId } = parseInput(req.body.text || '');
     const channelId = req.body.channel_id;
 
     if (!folder || !issueId) {
-        return res
-            .status(400)
-            .send('引数不足。例: circus_agent_ecosystem RA_DEV-81');
+        res.status(400).send('引数不足。例: circus_agent_ecosystem RA_DEV-81');
+        return;
     }
 
     const isAgent = folder === 'agent';
@@ -428,7 +514,7 @@ app.post('/do', async (req, res) => {
     let attempt = 0;
     let lastExitCode = 0;
     let lastOutput = '';
-    let extraPrompt = null;
+    let extraPrompt: string | null = null;
 
     while (attempt < MAX_RETRIES) {
         attempt++;

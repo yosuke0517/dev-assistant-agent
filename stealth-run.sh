@@ -68,7 +68,7 @@ cat > "$MCP_CONFIG" << MCPEOF
   "mcpServers": {
     "slack-human": {
       "command": "node",
-      "args": ["$SCRIPT_DIR/mcp-servers/slack-human-interaction/index.js"],
+      "args": ["$SCRIPT_DIR/dist/mcp-servers/slack-human-interaction/index.js"],
       "env": {
         "SLACK_BOT_TOKEN": "${SLACK_BOT_TOKEN}",
         "SLACK_CHANNEL": "${SLACK_CHANNEL}",
@@ -101,10 +101,16 @@ if [ ! -d "$SCRIPT_DIR/node_modules/@modelcontextprotocol" ]; then
     (cd "$SCRIPT_DIR" && npm install)
 fi
 
-# MCP Serverスクリプトのimportチェック → 失敗時は npm install で修復
-if ! node --input-type=module <<< "import '$SCRIPT_DIR/mcp-servers/slack-human-interaction/index.js'" 2>/dev/null; then
-    echo "MCP Server import failed. Running npm install to repair..."
-    (cd "$SCRIPT_DIR" && npm install)
+# ビルド済みファイルの存在チェック → なければ npm run build
+if [ ! -f "$SCRIPT_DIR/dist/mcp-servers/slack-human-interaction/index.js" ]; then
+    echo "Built files not found. Running npm run build..."
+    (cd "$SCRIPT_DIR" && npm run build)
+fi
+
+# MCP Serverスクリプトのimportチェック → 失敗時は npm install + build で修復
+if ! node --input-type=module <<< "import '$SCRIPT_DIR/dist/mcp-servers/slack-human-interaction/index.js'" 2>/dev/null; then
+    echo "MCP Server import failed. Running npm install and build to repair..."
+    (cd "$SCRIPT_DIR" && npm install && npm run build)
 fi
 
 # 6. エラー時・終了時に worktree と MCP設定をクリーンアップする trap

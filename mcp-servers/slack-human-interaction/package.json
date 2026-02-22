@@ -3,7 +3,7 @@
     "version": "1.0.0",
     "description": "MCP Server for asking questions to humans via Slack",
     "type": "module",
-    "main": "index.js",
+    "main": "index.ts",
     "dependencies": {
         "@modelcontextprotocol/sdk": "^1.26.0",
         "node-fetch": "^3.3.2"
