@@ -25,6 +25,11 @@ describe('stealth-run.sh', () => {
                 {
                     encoding: 'utf8',
                     stdio: 'pipe',
+                    env: {
+                        ...process.env,
+                        WORKSPACE_ROOT: '/tmp',
+                        AGENT_PROJECT_PATH: '/tmp/agent-dummy',
+                    },
                 },
             );
             // 成功した場合はテスト失敗
@@ -40,11 +45,8 @@ describe('stealth-run.sh', () => {
     it('agentキーワードの場合、dev-assistant-agentディレクトリが存在する', () => {
         const _fs = require ? require('node:fs') : null;
         // ESM環境でのチェック
-        const agentProjectPath =
-            process.env.AGENT_PROJECT_PATH ||
-            '/Users/takeuchiyosuke/work/dev-assistant-agent';
-        const workspaceRoot =
-            process.env.WORKSPACE_ROOT || '/Users/takeuchiyosuke/work/circus';
+        const agentProjectPath = process.env.AGENT_PROJECT_PATH || __dirname;
+        const workspaceRoot = process.env.WORKSPACE_ROOT || '/tmp';
         const checkScript = `
             FOLDER_NAME="agent"
             AGENT_PROJECT_PATH="${agentProjectPath}"
