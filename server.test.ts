@@ -15,6 +15,7 @@ describe('parseInput', () => {
         expect(result).toEqual({
             folder: 'circus_backend',
             issueId: 'PROJ-123',
+            baseBranch: undefined,
         });
     });
 
@@ -23,6 +24,7 @@ describe('parseInput', () => {
         expect(result).toEqual({
             folder: 'circus_backend',
             issueId: 'PROJ-123',
+            baseBranch: undefined,
         });
     });
 
@@ -31,6 +33,7 @@ describe('parseInput', () => {
         expect(result).toEqual({
             folder: 'circus_backend',
             issueId: 'PROJ-123',
+            baseBranch: undefined,
         });
     });
 
@@ -39,6 +42,7 @@ describe('parseInput', () => {
         expect(result).toEqual({
             folder: 'circus_backend',
             issueId: 'PROJ-123',
+            baseBranch: undefined,
         });
     });
 
@@ -47,6 +51,7 @@ describe('parseInput', () => {
         expect(result).toEqual({
             folder: 'circus_backend',
             issueId: 'PROJ-123',
+            baseBranch: undefined,
         });
     });
 
@@ -67,6 +72,34 @@ describe('parseInput', () => {
         expect(result).toEqual({
             folder: 'agent',
             issueId: '5',
+            baseBranch: undefined,
+        });
+    });
+
+    it('第3引数でベースブランチを指定できる', () => {
+        const result = parseInput('circus_backend RA_DEV-81 develop');
+        expect(result).toEqual({
+            folder: 'circus_backend',
+            issueId: 'RA_DEV-81',
+            baseBranch: 'develop',
+        });
+    });
+
+    it('ベースブランチ未指定の場合はundefinedになる', () => {
+        const result = parseInput('circus_backend RA_DEV-81');
+        expect(result).toEqual({
+            folder: 'circus_backend',
+            issueId: 'RA_DEV-81',
+            baseBranch: undefined,
+        });
+    });
+
+    it('カンマ区切りでもベースブランチを指定できる', () => {
+        const result = parseInput('circus_backend,RA_DEV-81,develop');
+        expect(result).toEqual({
+            folder: 'circus_backend',
+            issueId: 'RA_DEV-81',
+            baseBranch: 'develop',
         });
     });
 });

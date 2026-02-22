@@ -84,6 +84,54 @@ describe('stealth-run.sh', () => {
         expect(content).toContain('--disallowedTools AskUserQuestion');
     });
 
+    it('第3引数でベースブランチを受け取れるようになっている', async () => {
+        const fs = await import('node:fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        expect(content).toContain('BASE_BRANCH_ARG=$3');
+        expect(content).toContain('EXTRA_PROMPT=$4');
+    });
+
+    it('指定されたベースブランチがリモートに存在しない場合エラーで終了する', () => {
+        // 一時的なgitリポジトリを作成してテスト
+        const tmpDir = `/tmp/finegate-test-basebranch-${Date.now()}`;
+        try {
+            execSync(
+                `mkdir -p "${tmpDir}" && cd "${tmpDir}" && git init && git commit --allow-empty -m "init"`,
+                { encoding: 'utf8', stdio: 'pipe' },
+            );
+            // stealth-run.shを存在しないブランチ指定で実行
+            execSync(
+                `bash "${scriptPath}" "test_repo" "PROJ-123" "nonexistent_branch"`,
+                {
+                    encoding: 'utf8',
+                    stdio: 'pipe',
+                    env: {
+                        ...process.env,
+                        WORKSPACE_ROOT: tmpDir,
+                        AGENT_PROJECT_PATH: tmpDir,
+                    },
+                },
+            );
+            expect(false).toBe(true);
+        } catch (error) {
+            expect(error.status).not.toBe(0);
+            expect(error.stdout || error.stderr).toMatch(
+                /does not exist|error|Error/i,
+            );
+        } finally {
+            execSync(`rm -rf "${tmpDir}"`, { stdio: 'pipe' });
+        }
+    });
+
+    it('ベースブランチ指定ロジックと自動検出ロジックの両方が存在する', async () => {
+        const fs = await import('node:fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        // 引数指定パス
+        expect(content).toContain('Base branch (specified)');
+        // 自動検出パス
+        expect(content).toContain('Base branch (auto-detected)');
+    });
+
     it('プロンプトに ask_human MCPツール使用の指示が含まれる', async () => {
         const fs = await import('node:fs');
         const content = fs.readFileSync(scriptPath, 'utf8');

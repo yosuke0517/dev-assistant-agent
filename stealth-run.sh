@@ -10,9 +10,10 @@ if [ -f "$SCRIPT_DIR/.env" ]; then
 fi
 
 # 引数の受け取り
-FOLDER_NAME=$1  # 例: circus_backend または agent
-ISSUE_ID=$2    # 例: PROJ-123 または GitHub Issue番号
-EXTRA_PROMPT=$3 # オプション: ユーザーからの追加指示（リトライ時に使用）
+FOLDER_NAME=$1    # 例: circus_backend または agent
+ISSUE_ID=$2       # 例: PROJ-123 または GitHub Issue番号
+BASE_BRANCH_ARG=$3 # オプション: ベースブランチ指定（例: develop）
+EXTRA_PROMPT=$4    # オプション: ユーザーからの追加指示（リトライ時に使用）
 
 # 環境変数チェック
 if [ -z "$WORKSPACE_ROOT" ] || [ -z "$AGENT_PROJECT_PATH" ]; then
@@ -35,19 +36,31 @@ if [ ! -d "$TARGET_PATH" ]; then
     exit 1
 fi
 
-# 2. ベースブランチを自動検出
-BASE_BRANCH=$(git -C "$TARGET_PATH" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')
-if [ -z "$BASE_BRANCH" ]; then
-    if git -C "$TARGET_PATH" show-ref --verify --quiet refs/heads/main; then
-        BASE_BRANCH="main"
-    elif git -C "$TARGET_PATH" show-ref --verify --quiet refs/heads/master; then
-        BASE_BRANCH="master"
-    else
-        echo "Error: Could not detect base branch."
+# 2. ベースブランチを決定（引数指定 or 自動検出）
+if [ -n "$BASE_BRANCH_ARG" ]; then
+    # 引数でベースブランチが指定された場合、リモートに存在するか検証
+    git -C "$TARGET_PATH" fetch origin "$BASE_BRANCH_ARG" 2>/dev/null
+    if ! git -C "$TARGET_PATH" rev-parse --verify "origin/$BASE_BRANCH_ARG" >/dev/null 2>&1; then
+        echo "Error: Branch '$BASE_BRANCH_ARG' does not exist on remote."
         exit 1
     fi
+    BASE_BRANCH="$BASE_BRANCH_ARG"
+    echo "Base branch (specified): $BASE_BRANCH"
+else
+    # 自動検出
+    BASE_BRANCH=$(git -C "$TARGET_PATH" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')
+    if [ -z "$BASE_BRANCH" ]; then
+        if git -C "$TARGET_PATH" show-ref --verify --quiet refs/heads/main; then
+            BASE_BRANCH="main"
+        elif git -C "$TARGET_PATH" show-ref --verify --quiet refs/heads/master; then
+            BASE_BRANCH="master"
+        else
+            echo "Error: Could not detect base branch."
+            exit 1
+        fi
+    fi
+    echo "Base branch (auto-detected): $BASE_BRANCH"
 fi
-echo "Base branch: $BASE_BRANCH"
 
 # 3. 最新を取得（メインの作業ディレクトリには影響しない）
 git -C "$TARGET_PATH" fetch origin "$BASE_BRANCH"
