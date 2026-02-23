@@ -60,10 +60,15 @@ export function parseInput(rawText: string): ParsedInput {
         }
     }
 
+    // "undefined" 文字列はフロントエンド等で値未設定時に渡されることがあるため除外
+    const rawBranch = parts[2];
+    const baseBranch =
+        rawBranch && rawBranch !== 'undefined' ? rawBranch : undefined;
+
     return {
         folder: parts[0],
         issueId: parts[1],
-        baseBranch: parts[2],
+        baseBranch,
         userRequest: remaining || undefined,
     };
 }
