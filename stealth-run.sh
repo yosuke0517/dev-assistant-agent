@@ -202,6 +202,64 @@ ${FOLLOW_UP_MESSAGE}
 - 設計判断で迷った場合（例: このロジックはどこに置くべきか）
 勝手に解釈して進めず、必ず確認を取ってから実装してください。"
     fi
+elif [ -n "$USER_REQUEST" ]; then
+    # ユーザー要望モード: 既存ブランチで要望を実装（オープン済みPRの修正等）
+    if [ "$IS_SELF_PROJECT" = true ]; then
+        echo "Claude Code starting user request for GitHub Issue: #${ISSUE_ID} on branch ${BASE_BRANCH}..."
+        PROMPT="以下の作業を実行してください。
+
+【リポジトリ】yosuke0517/dev-assistant-agent
+【対象ブランチ】${BASE_BRANCH}（既存ブランチ）
+【課題ID】GitHub Issue #${ISSUE_ID}
+【ユーザーの要望】
+${USER_REQUEST}
+
+以下の手順で作業してください：
+1. git fetch origin を実行してリモートの最新状態を取得してください
+2. ブランチ ${BASE_BRANCH} をチェックアウトしてください
+3. ユーザーの要望を実装してください
+4. テストをパスさせてください
+5. 変更をコミットしてpushしてください（既存のPRに自動反映されます）
+
+【重要】新しいPRは作成しないでください。既存のブランチへのpushで自動的にPRが更新されます。
+【重要】絶対に main ブランチへ直接 push しないでください。
+
+【重要】ask_human MCPツールは --mcp-config で事前設定済みです。MCPの設定ファイルを調査する必要はありません。直接呼び出してください。
+
+【重要】実装中に以下のケースでは、必ず ask_human MCPツールを使用してSlackで確認してください（※ AskUserQuestion は使用禁止。必ず ask_human を使うこと）:
+- 仕様の解釈が複数通りある場合
+- 課題の記述が曖昧で実装方針が定まらない場合
+- 破壊的な変更（既存APIの変更、DB スキーマ変更等）を行う前
+- 設計判断で迷った場合（例: このロジックはどこに置くべきか）
+勝手に解釈して進めず、必ず確認を取ってから実装してください。"
+    else
+        echo "Claude Code starting user request for Backlog Issue: ${ISSUE_ID} on branch ${BASE_BRANCH}..."
+        PROMPT="以下の作業を実行してください。
+
+【対象ブランチ】${BASE_BRANCH}（既存ブランチ）
+【課題ID】${ISSUE_ID}
+【ユーザーの要望】
+${USER_REQUEST}
+
+以下の手順で作業してください：
+1. git fetch origin を実行してリモートの最新状態を取得してください
+2. ブランチ ${BASE_BRANCH} をチェックアウトしてください
+3. ユーザーの要望を実装してください
+4. テストをパスさせてください
+5. 変更をコミットしてpushしてください（既存のPRに自動反映されます）
+
+【重要】新しいPRは作成しないでください。pushで既存のPRが自動更新されます。
+【重要】絶対に main ブランチへ直接 push しないでください。
+
+【重要】ask_human MCPツールは --mcp-config で事前設定済みです。MCPの設定ファイルを調査する必要はありません。直接呼び出してください。
+
+【重要】実装中に以下のケースでは、必ず ask_human MCPツールを使用してSlackで確認してください（※ AskUserQuestion は使用禁止。必ず ask_human を使うこと）:
+- 仕様の解釈が複数通りある場合
+- 課題の記述が曖昧で実装方針が定まらない場合
+- 破壊的な変更（既存APIの変更、DB スキーマ変更等）を行う前
+- 設計判断で迷った場合（例: このロジックはどこに置くべきか）
+勝手に解釈して進めず、必ず確認を取ってから実装してください。"
+    fi
 elif [ "$IS_SELF_PROJECT" = true ]; then
     echo "Claude Code starting for GitHub Issue: #${ISSUE_ID}..."
     PROMPT="以下のSTEPに従って作業してください。

@@ -18,6 +18,7 @@ describe('parseInput', () => {
             folder: 'circus_backend',
             issueId: 'PROJ-123',
             baseBranch: undefined,
+            userRequest: undefined,
         });
     });
 
@@ -27,6 +28,7 @@ describe('parseInput', () => {
             folder: 'circus_backend',
             issueId: 'PROJ-123',
             baseBranch: undefined,
+            userRequest: undefined,
         });
     });
 
@@ -36,6 +38,7 @@ describe('parseInput', () => {
             folder: 'circus_backend',
             issueId: 'PROJ-123',
             baseBranch: undefined,
+            userRequest: undefined,
         });
     });
 
@@ -45,6 +48,7 @@ describe('parseInput', () => {
             folder: 'circus_backend',
             issueId: 'PROJ-123',
             baseBranch: undefined,
+            userRequest: undefined,
         });
     });
 
@@ -54,6 +58,7 @@ describe('parseInput', () => {
             folder: 'circus_backend',
             issueId: 'PROJ-123',
             baseBranch: undefined,
+            userRequest: undefined,
         });
     });
 
@@ -61,12 +66,14 @@ describe('parseInput', () => {
         const result = parseInput('');
         expect(result.folder).toBe('');
         expect(result.issueId).toBeUndefined();
+        expect(result.userRequest).toBeUndefined();
     });
 
     it('課題キーなしの場合、issueId が undefined になる', () => {
         const result = parseInput('circus_backend');
         expect(result.folder).toBe('circus_backend');
         expect(result.issueId).toBeUndefined();
+        expect(result.userRequest).toBeUndefined();
     });
 
     it('agentキーワードとGitHub Issue番号をパースできる', () => {
@@ -75,6 +82,7 @@ describe('parseInput', () => {
             folder: 'agent',
             issueId: '5',
             baseBranch: undefined,
+            userRequest: undefined,
         });
     });
 
@@ -84,6 +92,7 @@ describe('parseInput', () => {
             folder: 'circus_backend',
             issueId: 'RA_DEV-81',
             baseBranch: 'develop',
+            userRequest: undefined,
         });
     });
 
@@ -93,6 +102,7 @@ describe('parseInput', () => {
             folder: 'circus_backend',
             issueId: 'RA_DEV-81',
             baseBranch: undefined,
+            userRequest: undefined,
         });
     });
 
@@ -102,6 +112,44 @@ describe('parseInput', () => {
             folder: 'circus_backend',
             issueId: 'RA_DEV-81',
             baseBranch: 'develop',
+            userRequest: undefined,
+        });
+    });
+
+    it('第4引数でユーザー要望を受け取れる', () => {
+        const result = parseInput(
+            'circus_backend RA_DEV-85 feat/RA_DEV-85 CIでテスト時にエラーが出てるので調査して修正してほしい',
+        );
+        expect(result).toEqual({
+            folder: 'circus_backend',
+            issueId: 'RA_DEV-85',
+            baseBranch: 'feat/RA_DEV-85',
+            userRequest:
+                'CIでテスト時にエラーが出てるので調査して修正してほしい',
+        });
+    });
+
+    it('ユーザー要望にスペースが含まれていても正しくパースできる', () => {
+        const result = parseInput(
+            'circus_backend RA_DEV-85 feat/RA_DEV-85 CI error fix please',
+        );
+        expect(result).toEqual({
+            folder: 'circus_backend',
+            issueId: 'RA_DEV-85',
+            baseBranch: 'feat/RA_DEV-85',
+            userRequest: 'CI error fix please',
+        });
+    });
+
+    it('agentキーワードでもユーザー要望を受け取れる', () => {
+        const result = parseInput(
+            'agent 46 feat/issue-46 テストを追加してほしい',
+        );
+        expect(result).toEqual({
+            folder: 'agent',
+            issueId: '46',
+            baseBranch: 'feat/issue-46',
+            userRequest: 'テストを追加してほしい',
         });
     });
 });

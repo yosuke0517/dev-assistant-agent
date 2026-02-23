@@ -139,6 +139,29 @@ describe('stealth-run.sh', () => {
         expect(content).toContain('AskUserQuestion は使用禁止');
     });
 
+    it('USER_REQUESTモードのプロンプトが含まれる', async () => {
+        const fs = await import('node:fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        expect(content).toContain('USER_REQUEST');
+        expect(content).toContain('ユーザーの要望');
+        expect(content).toContain(
+            '新しいPRは作成しないでください。既存のブランチへのpushで自動的にPRが更新されます',
+        );
+    });
+
+    it('USER_REQUESTモードでagentとBacklog両方のプロンプトが存在する', async () => {
+        const fs = await import('node:fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        // agent用のプロンプト
+        expect(content).toContain(
+            'Claude Code starting user request for GitHub Issue',
+        );
+        // Backlog用のプロンプト
+        expect(content).toContain(
+            'Claude Code starting user request for Backlog Issue',
+        );
+    });
+
     it('非agentプロジェクトのプロンプトにPR作成の指示が含まれる', async () => {
         const fs = await import('node:fs');
         const content = fs.readFileSync(scriptPath, 'utf8');
