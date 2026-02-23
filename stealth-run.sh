@@ -42,16 +42,20 @@ if [ ! -d "$TARGET_PATH" ]; then
 fi
 
 # 2. ベースブランチを決定（引数指定 or 自動検出）
+# 指定されたブランチがリモートに存在しない場合は自動検出にフォールバック
 if [ -n "$BASE_BRANCH_ARG" ]; then
     # 引数でベースブランチが指定された場合、リモートに存在するか検証
     git -C "$TARGET_PATH" fetch origin "$BASE_BRANCH_ARG" 2>/dev/null
-    if ! git -C "$TARGET_PATH" rev-parse --verify "origin/$BASE_BRANCH_ARG" >/dev/null 2>&1; then
-        echo "Error: Branch '$BASE_BRANCH_ARG' does not exist on remote."
-        exit 1
+    if git -C "$TARGET_PATH" rev-parse --verify "origin/$BASE_BRANCH_ARG" >/dev/null 2>&1; then
+        BASE_BRANCH="$BASE_BRANCH_ARG"
+        echo "Base branch (specified): $BASE_BRANCH"
+    else
+        echo "Warning: Branch '$BASE_BRANCH_ARG' does not exist on remote. Falling back to auto-detection."
+        BASE_BRANCH_ARG=""
     fi
-    BASE_BRANCH="$BASE_BRANCH_ARG"
-    echo "Base branch (specified): $BASE_BRANCH"
-else
+fi
+
+if [ -z "$BASE_BRANCH" ]; then
     # 自動検出
     BASE_BRANCH=$(git -C "$TARGET_PATH" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')
     if [ -z "$BASE_BRANCH" ]; then
