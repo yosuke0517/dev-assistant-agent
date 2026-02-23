@@ -264,6 +264,7 @@ interface InteractiveHandlerOptions {
     postFn?: PostFn;
     waitReplyFn?: typeof waitForSlackReply;
     timeoutMs?: number;
+    originalCommand?: string;
 }
 
 interface UserDecision {
@@ -278,6 +279,7 @@ interface UserDecision {
 export class InteractiveHandler {
     channel: string | null;
     threadTs: string | null;
+    originalCommand: string | undefined;
     private _post: PostFn;
     private _waitReply: typeof waitForSlackReply;
     timeoutMs: number;
@@ -289,6 +291,7 @@ export class InteractiveHandler {
     ) {
         this.channel = channel;
         this.threadTs = threadTs;
+        this.originalCommand = options.originalCommand;
         this._post = options.postFn || postToSlack;
         this._waitReply = options.waitReplyFn || waitForSlackReply;
         this.timeoutMs = options.timeoutMs || 1_800_000;
@@ -306,12 +309,15 @@ export class InteractiveHandler {
         }
 
         const mention = formatMention();
+        const commandSection = this.originalCommand
+            ? ['', '*実行コマンド:*', `\`/do ${this.originalCommand}\``, '']
+            : [''];
         const question = [
             `${mention}⚠️ *エラーが発生しました*`,
             '```',
             errorSummary.substring(0, 500),
             '```',
-            '',
+            ...commandSection,
             '続行方法を返信してください:',
             '• `retry` または `再実行` → 同じタスクを再実行',
             '• `abort` または `中断` → タスクを中断',
@@ -655,7 +661,10 @@ app.post('/do', async (req: Request, res: Response) => {
     tracker.start();
 
     // 4. インタラクティブハンドラー（エラー時にSlackで確認）
-    const interactive = new InteractiveHandler(channelId, parentTs);
+    const rawText = req.body.text || '';
+    const interactive = new InteractiveHandler(channelId, parentTs, {
+        originalCommand: rawText.trim() || undefined,
+    });
 
     const MAX_RETRIES = 3;
     let attempt = 0;

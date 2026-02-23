@@ -1027,6 +1027,53 @@ describe('InteractiveHandler', () => {
         }
     });
 
+    it('originalCommand設定時にエラーメッセージに実行コマンドが含まれる', async () => {
+        const consoleSpy = vi
+            .spyOn(console, 'log')
+            .mockImplementation(() => {});
+        const mockPost = vi.fn().mockResolvedValue('1234.5680');
+        const mockWaitReply = vi
+            .fn()
+            .mockResolvedValue({ text: 'retry', user: 'U123' });
+
+        const handler = new InteractiveHandler('C123456', '1234.5678', {
+            postFn: mockPost,
+            waitReplyFn: mockWaitReply,
+            originalCommand: 'circus_backend RA_DEV-85 develop',
+        });
+
+        await handler.askUser('test error');
+
+        const sentText = mockPost.mock.calls[0][1];
+        expect(sentText).toContain('実行コマンド');
+        expect(sentText).toContain('`/do circus_backend RA_DEV-85 develop`');
+
+        consoleSpy.mockRestore();
+    });
+
+    it('originalCommand未設定時はエラーメッセージに実行コマンドが含まれない', async () => {
+        const consoleSpy = vi
+            .spyOn(console, 'log')
+            .mockImplementation(() => {});
+        const mockPost = vi.fn().mockResolvedValue('1234.5680');
+        const mockWaitReply = vi
+            .fn()
+            .mockResolvedValue({ text: 'retry', user: 'U123' });
+
+        const handler = new InteractiveHandler('C123456', '1234.5678', {
+            postFn: mockPost,
+            waitReplyFn: mockWaitReply,
+        });
+
+        await handler.askUser('test error');
+
+        const sentText = mockPost.mock.calls[0][1];
+        expect(sentText).not.toContain('実行コマンド');
+        expect(sentText).not.toContain('/do');
+
+        consoleSpy.mockRestore();
+    });
+
     it('エラーサマリーが500文字を超える場合は切り詰められる', async () => {
         const consoleSpy = vi
             .spyOn(console, 'log')
