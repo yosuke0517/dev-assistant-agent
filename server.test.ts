@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
     extractErrorSummary,
+    FollowUpHandler,
     InteractiveHandler,
     ProgressTracker,
     parseInput,
@@ -1027,5 +1028,201 @@ describe('PR URL detection regex', () => {
         const output = 'タスクが完了しました。レポートを送信します。';
         const match = output.match(prUrlRegex);
         expect(match).toBeNull();
+    });
+});
+
+describe('FollowUpHandler', () => {
+    it('channel未設定の場合はendを返す', async () => {
+        const handler = new FollowUpHandler(null, null);
+        const result = await handler.waitForFollowUp('TEST-1');
+        expect(result).toEqual({
+            action: 'end',
+            message: 'Slackチャンネル/スレッド未設定',
+        });
+    });
+
+    it('threadTs未設定の場合はendを返す', async () => {
+        const handler = new FollowUpHandler('C123456', null);
+        const result = await handler.waitForFollowUp('TEST-1');
+        expect(result).toEqual({
+            action: 'end',
+            message: 'Slackチャンネル/スレッド未設定',
+        });
+    });
+
+    it('Slack送信失敗の場合はendを返す', async () => {
+        const mockPost = vi.fn().mockResolvedValue(null);
+        const handler = new FollowUpHandler('C123456', '1234.5678', {
+            postFn: mockPost,
+        });
+        const result = await handler.waitForFollowUp('TEST-1');
+        expect(result).toEqual({ action: 'end', message: 'Slack送信失敗' });
+    });
+
+    it('ユーザーが追加依頼を返信した場合はfollow_upを返す', async () => {
+        const consoleSpy = vi
+            .spyOn(console, 'log')
+            .mockImplementation(() => {});
+        const mockPost = vi.fn().mockResolvedValue('1234.5680');
+        const mockWaitReply = vi.fn().mockResolvedValue({
+            text: 'テストを追加してください',
+            user: 'U123',
+        });
+
+        const handler = new FollowUpHandler('C123456', '1234.5678', {
+            postFn: mockPost,
+            waitReplyFn: mockWaitReply,
+        });
+
+        const result = await handler.waitForFollowUp('Issue #37');
+
+        expect(result).toEqual({
+            action: 'follow_up',
+            message: 'テストを追加してください',
+        });
+        expect(mockPost).toHaveBeenCalledTimes(1);
+        expect(mockPost.mock.calls[0][1]).toContain('Issue #37');
+        expect(mockPost.mock.calls[0][1]).toContain('追加の依頼');
+        expect(mockWaitReply).toHaveBeenCalledTimes(1);
+
+        consoleSpy.mockRestore();
+    });
+
+    it('ユーザーが終了と返信した場合はendを返す', async () => {
+        const consoleSpy = vi
+            .spyOn(console, 'log')
+            .mockImplementation(() => {});
+        const mockPost = vi.fn().mockResolvedValue('1234.5680');
+        const mockWaitReply = vi
+            .fn()
+            .mockResolvedValue({ text: '終了', user: 'U123' });
+
+        const handler = new FollowUpHandler('C123456', '1234.5678', {
+            postFn: mockPost,
+            waitReplyFn: mockWaitReply,
+        });
+
+        const result = await handler.waitForFollowUp('TEST-1');
+        expect(result).toEqual({ action: 'end', message: '終了' });
+
+        consoleSpy.mockRestore();
+    });
+
+    it('ユーザーがendと返信した場合はendを返す', async () => {
+        const consoleSpy = vi
+            .spyOn(console, 'log')
+            .mockImplementation(() => {});
+        const mockPost = vi.fn().mockResolvedValue('1234.5680');
+        const mockWaitReply = vi
+            .fn()
+            .mockResolvedValue({ text: 'end', user: 'U123' });
+
+        const handler = new FollowUpHandler('C123456', '1234.5678', {
+            postFn: mockPost,
+            waitReplyFn: mockWaitReply,
+        });
+
+        const result = await handler.waitForFollowUp('TEST-1');
+        expect(result).toEqual({ action: 'end', message: 'end' });
+
+        consoleSpy.mockRestore();
+    });
+
+    it('タイムアウト時はendを返す', async () => {
+        const consoleSpy = vi
+            .spyOn(console, 'log')
+            .mockImplementation(() => {});
+        const mockPost = vi.fn().mockResolvedValue('1234.5680');
+        const mockWaitReply = vi.fn().mockResolvedValue(null);
+
+        const handler = new FollowUpHandler('C123456', '1234.5678', {
+            postFn: mockPost,
+            waitReplyFn: mockWaitReply,
+        });
+
+        const result = await handler.waitForFollowUp('TEST-1');
+        expect(result).toEqual({
+            action: 'end',
+            message: 'タイムアウト（返信なし）',
+        });
+
+        consoleSpy.mockRestore();
+    });
+
+    it('OWNER_SLACK_MEMBER_ID設定時にメンションが含まれる', async () => {
+        const originalOwner = process.env.OWNER_SLACK_MEMBER_ID;
+        process.env.OWNER_SLACK_MEMBER_ID = 'U12345678';
+
+        const consoleSpy = vi
+            .spyOn(console, 'log')
+            .mockImplementation(() => {});
+        const mockPost = vi.fn().mockResolvedValue('1234.5680');
+        const mockWaitReply = vi.fn().mockResolvedValue({
+            text: 'バグを修正して',
+            user: 'U123',
+        });
+
+        const handler = new FollowUpHandler('C123456', '1234.5678', {
+            postFn: mockPost,
+            waitReplyFn: mockWaitReply,
+        });
+
+        await handler.waitForFollowUp('TEST-1');
+
+        const sentText = mockPost.mock.calls[0][1];
+        expect(sentText).toContain('<@U12345678>');
+        expect(sentText).toContain('追加の依頼');
+
+        consoleSpy.mockRestore();
+        if (originalOwner !== undefined) {
+            process.env.OWNER_SLACK_MEMBER_ID = originalOwner;
+        } else {
+            delete process.env.OWNER_SLACK_MEMBER_ID;
+        }
+    });
+
+    it('issueLabel がメッセージに含まれる', async () => {
+        const consoleSpy = vi
+            .spyOn(console, 'log')
+            .mockImplementation(() => {});
+        const mockPost = vi.fn().mockResolvedValue('1234.5680');
+        const mockWaitReply = vi
+            .fn()
+            .mockResolvedValue({ text: 'end', user: 'U123' });
+
+        const handler = new FollowUpHandler('C123456', '1234.5678', {
+            postFn: mockPost,
+            waitReplyFn: mockWaitReply,
+        });
+
+        await handler.waitForFollowUp('GitHub Issue #37');
+
+        const sentText = mockPost.mock.calls[0][1];
+        expect(sentText).toContain('GitHub Issue #37');
+
+        consoleSpy.mockRestore();
+    });
+
+    it('タイムアウト時間がメッセージに含まれる', async () => {
+        const consoleSpy = vi
+            .spyOn(console, 'log')
+            .mockImplementation(() => {});
+        const mockPost = vi.fn().mockResolvedValue('1234.5680');
+        const mockWaitReply = vi
+            .fn()
+            .mockResolvedValue({ text: 'end', user: 'U123' });
+
+        const handler = new FollowUpHandler('C123456', '1234.5678', {
+            postFn: mockPost,
+            waitReplyFn: mockWaitReply,
+            timeoutMs: 600_000,
+        });
+
+        await handler.waitForFollowUp('TEST-1');
+
+        const sentText = mockPost.mock.calls[0][1];
+        expect(sentText).toContain('10分以内');
+
+        consoleSpy.mockRestore();
     });
 });
