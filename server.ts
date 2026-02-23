@@ -520,6 +520,19 @@ export function spawnWorker(
     });
 }
 
+/**
+ * 出力から最後のPR URLを抽出する
+ * Claude Codeの出力には過去のPR URLが含まれる場合があるため、
+ * 最後に出現するURLを返す（新しく作成されたPRが最後に出力されるため）
+ */
+export function extractLastPrUrl(output: string): string | null {
+    const prUrlRegex =
+        /https:\/\/(?:github\.com\/[^\s"]+\/pull\/\d+|[^\s"]+\.backlog\.(?:jp|com)\/[^\s"]+\/pullRequests\/\d+)/g;
+    const matches = output.match(prUrlRegex);
+    if (!matches || matches.length === 0) return null;
+    return matches[matches.length - 1];
+}
+
 /** 出力からエラーサマリーを抽出する */
 export function extractErrorSummary(output: string): string {
     // ANSIエスケープシーケンスを除去
@@ -686,13 +699,10 @@ app.post('/do', async (req: Request, res: Response) => {
     tracker.stop();
 
     // 6. 完了メッセージをスレッドに投稿
-    const prUrlRegex =
-        /https:\/\/(?:github\.com\/[^\s"]+\/pull\/\d+|[^\s"]+\.backlog\.(?:jp|com)\/[^\s"]+\/pullRequests\/\d+)/;
-
     if (channelId && parentTs) {
-        const prUrlMatch = lastOutput.match(prUrlRegex);
-        const prMessage = prUrlMatch
-            ? `\nPRが作成されました: ${prUrlMatch[0]}`
+        const prUrl = extractLastPrUrl(lastOutput);
+        const prMessage = prUrl
+            ? `\nPRが作成されました: ${prUrl}`
             : '\nPRの作成を確認できませんでした。詳細はターミナルのログを確認してください。';
 
         const retryInfo = attempt > 1 ? ` (試行回数: ${attempt})` : '';
