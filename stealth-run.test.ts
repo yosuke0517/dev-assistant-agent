@@ -150,6 +150,25 @@ describe('stealth-run.sh', () => {
         expect(content).toContain('コード変更を伴わない作業の場合');
     });
 
+    it('PRは必ずdraft状態で作成する指示が含まれる', async () => {
+        const fs = await import('node:fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        // GitHub用プロンプトとBacklog用プロンプトの両方にdraft指示がある
+        const draftMatches = content.match(/draft状態で作成/g);
+        expect(draftMatches).not.toBeNull();
+        expect(draftMatches!.length).toBeGreaterThanOrEqual(2);
+        expect(content).toContain('--draft');
+    });
+
+    it('PRのマージ先にベースブランチを指定する指示が含まれる', async () => {
+        const fs = await import('node:fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        // GitHub用プロンプトとBacklog用プロンプトの両方にベースブランチ指定がある
+        const baseMatches = content.match(/--base \$\{BASE_BRANCH\}/g);
+        expect(baseMatches).not.toBeNull();
+        expect(baseMatches!.length).toBeGreaterThanOrEqual(2);
+    });
+
     it('ディレクトリが存在する場合、最初のチェックは通過する（git操作前まで）', () => {
         // 実際に存在するディレクトリ（カレントディレクトリ）を使用
         const _existingFolder = '.';
