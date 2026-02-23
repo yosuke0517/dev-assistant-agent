@@ -163,24 +163,57 @@ fi
 echo "Creating worktree at: $WORKTREE_PATH"
 git -C "$TARGET_PATH" worktree add --detach "$WORKTREE_PATH" "$WORKTREE_START"
 
-# 5. MCP設定ファイルを動的に生成（ask_human ツール用）
+# 5. MCP設定ファイルを動的に生成（ask_human + グローバル・プロジェクトMCPをマージ）
 MCP_CONFIG="/tmp/finegate-mcp-config-$$.json"
-cat > "$MCP_CONFIG" << MCPEOF
-{
-  "mcpServers": {
-    "slack-human": {
-      "command": "node",
-      "args": ["$SCRIPT_DIR/dist/mcp-servers/slack-human-interaction/index.js"],
-      "env": {
-        "SLACK_BOT_TOKEN": "${SLACK_BOT_TOKEN}",
-        "SLACK_CHANNEL": "${SLACK_CHANNEL}",
-        "SLACK_THREAD_TS": "${SLACK_THREAD_TS}",
-        "OWNER_SLACK_MEMBER_ID": "${OWNER_SLACK_MEMBER_ID}"
-      }
+MCP_SCRIPT_DIR="$SCRIPT_DIR" \
+MCP_TARGET_PATH="$TARGET_PATH" \
+MCP_OUTPUT="$MCP_CONFIG" \
+node -e "
+const fs = require('fs');
+const path = require('path');
+
+const scriptDir = process.env.MCP_SCRIPT_DIR;
+const targetPath = process.env.MCP_TARGET_PATH;
+const output = process.env.MCP_OUTPUT;
+
+let mcpServers = {};
+
+// 1. グローバルMCP設定 (~/.claude/.mcp.json) を読み込み（最低優先度）
+const globalPath = path.join(process.env.HOME || '', '.claude', '.mcp.json');
+try {
+    if (fs.existsSync(globalPath)) {
+        const g = JSON.parse(fs.readFileSync(globalPath, 'utf-8'));
+        if (g.mcpServers) Object.assign(mcpServers, g.mcpServers);
     }
-  }
+} catch (e) {
+    console.error('Warning: global MCP config parse error:', e.message);
 }
-MCPEOF
+
+// 2. プロジェクトレベルMCP設定 (\$TARGET_PATH/.mcp.json) を読み込み（中優先度）
+const projectPath = path.join(targetPath, '.mcp.json');
+try {
+    if (fs.existsSync(projectPath)) {
+        const p = JSON.parse(fs.readFileSync(projectPath, 'utf-8'));
+        if (p.mcpServers) Object.assign(mcpServers, p.mcpServers);
+    }
+} catch (e) {
+    console.error('Warning: project MCP config parse error:', e.message);
+}
+
+// 3. セッション固有のslack-human設定（最高優先度）
+mcpServers['slack-human'] = {
+    command: 'node',
+    args: [path.join(scriptDir, 'dist/mcp-servers/slack-human-interaction/index.js')],
+    env: {
+        SLACK_BOT_TOKEN: process.env.SLACK_BOT_TOKEN || '',
+        SLACK_CHANNEL: process.env.SLACK_CHANNEL || '',
+        SLACK_THREAD_TS: process.env.SLACK_THREAD_TS || '',
+        OWNER_SLACK_MEMBER_ID: process.env.OWNER_SLACK_MEMBER_ID || ''
+    }
+};
+
+fs.writeFileSync(output, JSON.stringify({ mcpServers }, null, 2));
+"
 
 # 6. MCP設定の検証と依存関係の自動修復
 echo "MCP config: $MCP_CONFIG"
