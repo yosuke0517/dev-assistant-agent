@@ -1,115 +1,32 @@
 import 'dotenv/config';
-import express, { type Request, type Response } from 'express';
+import express from 'express';
 import pty from 'node-pty';
-import {
-    type FetchFn,
-    formatMention,
-    postToSlack,
-    type RetryOptions,
-    type SlackReply,
-    type WaitForSlackReplyOptions,
-    waitForSlackReply,
-} from './lib/slack.js';
+import { formatMention, postToSlack, waitForSlackReply } from './lib/slack.js';
 
 export { formatMention, postToSlack, waitForSlackReply };
-export type { FetchFn, RetryOptions, SlackReply, WaitForSlackReplyOptions };
-
-type PostFn = typeof postToSlack;
 
 const app = express();
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-interface ParsedInput {
-    folder: string;
-    issueId: string | undefined;
-    baseBranch: string | undefined;
-    userRequest: string | undefined;
-}
-
 /**
- * 入力テキストをフォルダ名・課題ID・ベースブランチ・ユーザー要望に分割
- * 例: "circus_backend RA_DEV-81 develop" -> { folder, issueId, baseBranch }
- * 例: "circus_backend RA_DEV-85 feat/RA_DEV-85 CIでテスト時にエラーが出てるので修正してほしい"
- *   -> { folder, issueId, baseBranch, userRequest }
+ * 入力テキストをフォルダ名と課題IDに分割
+ * 例: "circus_agent_ecosystem RA_DEV-81" -> { folder, issueId }
  */
-export function parseInput(rawText: string): ParsedInput {
-    const trimmed = rawText.trim();
-    if (!trimmed) {
-        return {
-            folder: '',
-            issueId: undefined,
-            baseBranch: undefined,
-            userRequest: undefined,
-        };
-    }
-
-    const delimiterPattern = /[,、 ]+/;
-    const parts: string[] = [];
-    let remaining = trimmed;
-
-    for (let i = 0; i < 3 && remaining; i++) {
-        const match = remaining.match(delimiterPattern);
-        if (match && match.index !== undefined) {
-            parts.push(remaining.substring(0, match.index));
-            remaining = remaining.substring(match.index + match[0].length);
-        } else {
-            parts.push(remaining);
-            remaining = '';
-            break;
-        }
-    }
-
-    return {
-        folder: parts[0],
-        issueId: parts[1],
-        baseBranch: parts[2],
-        userRequest: remaining || undefined,
-    };
+export function parseInput(rawText) {
+    const parts = rawText.split(/[,、 ]+/);
+    return { folder: parts[0], issueId: parts[1] };
 }
 
-function timestamp(): string {
+function timestamp() {
     return `[${new Date().toLocaleString()}]`;
-}
-
-interface StreamEventBase {
-    type: string;
-    [key: string]: unknown;
-}
-
-interface ContentBlock {
-    type: string;
-    text?: string;
-    name?: string;
-    input?: Record<string, unknown>;
-    content?: string | unknown[];
-    is_error?: boolean;
-    tool_use_id?: string;
-}
-
-interface StreamMessage {
-    content?: ContentBlock[];
-}
-
-interface StreamEvent extends StreamEventBase {
-    session_id?: string;
-    tools?: string[];
-    message?: StreamMessage;
-    cost_usd?: number;
-    num_turns?: number;
-    duration_ms?: number;
-    result?: string;
-    subtype?: string;
 }
 
 /**
  * stream-json形式のイベントをパースしてログ出力する
  */
-export function processStreamEvent(
-    line: string,
-    tracker: ProgressTracker | null = null,
-): StreamEvent | { type: 'raw'; text: string } {
-    let event: StreamEvent;
+export function processStreamEvent(line, tracker = null) {
+    let event;
     try {
         event = JSON.parse(line);
     } catch {
@@ -142,7 +59,7 @@ export function processStreamEvent(
                     );
                 } else if (block.type === 'tool_use') {
                     const inputSummary = summarizeToolInput(
-                        block.name ?? '',
+                        block.name,
                         block.input,
                     );
                     console.log(
@@ -202,20 +119,12 @@ export function processStreamEvent(
  * 1分ごとのタイマーでSlackに送信し、バッファをリセット
  */
 export class ProgressTracker {
-    channel: string | null;
-    issueId: string;
-    threadTs: string | null;
-    intervalMs: number;
-    activities: string[];
-    timer: ReturnType<typeof setInterval> | null;
-    private _post: PostFn;
-
     constructor(
-        channel: string | null,
-        issueId: string,
-        threadTs: string | null,
+        channel,
+        issueId,
+        threadTs,
         intervalMs = 60_000,
-        postFn: PostFn = postToSlack,
+        postFn = postToSlack,
     ) {
         this.channel = channel;
         this.issueId = issueId;
@@ -226,12 +135,12 @@ export class ProgressTracker {
         this._post = postFn;
     }
 
-    start(): void {
+    start() {
         if (!this.channel) return;
         this.timer = setInterval(() => this._flush(), this.intervalMs);
     }
 
-    stop(): void {
+    stop() {
         if (this.timer) {
             clearInterval(this.timer);
             this.timer = null;
@@ -239,11 +148,11 @@ export class ProgressTracker {
     }
 
     /** イベントから進捗メッセージを追加 */
-    addActivity(message: string): void {
+    addActivity(message) {
         this.activities.push(message);
     }
 
-    async _flush(): Promise<void> {
+    async _flush() {
         if (!this.channel || this.activities.length === 0) return;
 
         // 直近のアクティビティをまとめて送信（最大10件）
@@ -254,21 +163,10 @@ export class ProgressTracker {
 
         try {
             await this._post(this.channel, text, this.threadTs);
-        } catch (err: unknown) {
-            console.error('進捗通知の送信に失敗:', (err as Error).message);
+        } catch (err) {
+            console.error('進捗通知の送信に失敗:', err.message);
         }
     }
-}
-
-interface InteractiveHandlerOptions {
-    postFn?: PostFn;
-    waitReplyFn?: typeof waitForSlackReply;
-    timeoutMs?: number;
-}
-
-interface UserDecision {
-    action: 'retry' | 'abort';
-    message: string;
 }
 
 /**
@@ -276,17 +174,7 @@ interface UserDecision {
  * processStreamEventと連携してエラーを自動検知する
  */
 export class InteractiveHandler {
-    channel: string | null;
-    threadTs: string | null;
-    private _post: PostFn;
-    private _waitReply: typeof waitForSlackReply;
-    timeoutMs: number;
-
-    constructor(
-        channel: string | null,
-        threadTs: string | null,
-        options: InteractiveHandlerOptions = {},
-    ) {
+    constructor(channel, threadTs, options = {}) {
         this.channel = channel;
         this.threadTs = threadTs;
         this._post = options.postFn || postToSlack;
@@ -296,8 +184,10 @@ export class InteractiveHandler {
 
     /**
      * エラー発生時にSlackでユーザーに確認を送り、返信を待つ
+     * @param {string} errorSummary - エラー内容のサマリー
+     * @returns {Promise<{action: 'retry'|'abort', message: string}>}
      */
-    async askUser(errorSummary: string): Promise<UserDecision> {
+    async askUser(errorSummary) {
         if (!this.channel || !this.threadTs) {
             return {
                 action: 'abort',
@@ -353,135 +243,33 @@ export class InteractiveHandler {
     }
 }
 
-interface FollowUpHandlerOptions {
-    postFn?: PostFn;
-    waitReplyFn?: typeof waitForSlackReply;
-    timeoutMs?: number;
-}
-
-interface FollowUpDecision {
-    action: 'follow_up' | 'end';
-    message: string;
-}
-
-/**
- * タスク完了後にSlackスレッドでフォローアップ（追加依頼）を待つハンドラー
- */
-export class FollowUpHandler {
-    channel: string | null;
-    threadTs: string | null;
-    private _post: PostFn;
-    private _waitReply: typeof waitForSlackReply;
-    timeoutMs: number;
-
-    constructor(
-        channel: string | null,
-        threadTs: string | null,
-        options: FollowUpHandlerOptions = {},
-    ) {
-        this.channel = channel;
-        this.threadTs = threadTs;
-        this._post = options.postFn || postToSlack;
-        this._waitReply = options.waitReplyFn || waitForSlackReply;
-        this.timeoutMs = options.timeoutMs || 1_800_000;
-    }
-
-    /**
-     * フォローアップの依頼をSlackスレッドで待機する
-     */
-    async waitForFollowUp(issueLabel: string): Promise<FollowUpDecision> {
-        if (!this.channel || !this.threadTs) {
-            return {
-                action: 'end',
-                message: 'Slackチャンネル/スレッド未設定',
-            };
-        }
-
-        const mention = formatMention();
-        const prompt = [
-            `${mention}💡 *${issueLabel}* の対応が完了しました。追加の依頼があればこのスレッドに返信してください。`,
-            '',
-            '• 修正や追加の依頼内容を自由に記述してください',
-            '• `終了` または `end` → セッションを終了',
-            '',
-            `_${Math.floor(this.timeoutMs / 60_000)}分以内に返信がない場合は自動でセッションを終了します_`,
-        ].join('\n');
-
-        const questionTs = await this._post(
-            this.channel,
-            prompt,
-            this.threadTs,
-        );
-        if (!questionTs) {
-            return { action: 'end', message: 'Slack送信失敗' };
-        }
-
-        console.log(`${timestamp()} 💡 フォローアップの返信を待機中...`);
-
-        const reply = await this._waitReply(
-            this.channel,
-            this.threadTs,
-            questionTs,
-            {
-                timeoutMs: this.timeoutMs,
-            },
-        );
-
-        if (!reply) {
-            return { action: 'end', message: 'タイムアウト（返信なし）' };
-        }
-
-        const normalized = reply.text.trim().toLowerCase();
-        if (normalized === '終了' || normalized === 'end') {
-            return { action: 'end', message: reply.text };
-        }
-
-        return { action: 'follow_up', message: reply.text };
-    }
-}
-
-function summarizeToolInput(
-    toolName: string,
-    input?: Record<string, unknown>,
-): string {
+function summarizeToolInput(toolName, input) {
     if (!input) return '';
     switch (toolName) {
         case 'Bash':
-            return `> ${(input.command as string) || ''}`.substring(0, 150);
+            return `> ${input.command || ''}`.substring(0, 150);
         case 'Read':
-            return `📄 ${(input.file_path as string) || ''}`;
+            return `📄 ${input.file_path || ''}`;
         case 'Edit':
-            return `✏️ ${(input.file_path as string) || ''}`;
+            return `✏️ ${input.file_path || ''}`;
         case 'Write':
-            return `📝 ${(input.file_path as string) || ''}`;
+            return `📝 ${input.file_path || ''}`;
         case 'Glob':
-            return `🔍 ${(input.pattern as string) || ''}`;
+            return `🔍 ${input.pattern || ''}`;
         case 'Grep':
-            return `🔎 "${(input.pattern as string) || ''}" in ${(input.path as string) || '.'}`;
+            return `🔎 "${input.pattern || ''}" in ${input.path || '.'}`;
         case 'Task':
-            return `🤖 ${(input.description as string) || ''}`;
+            return `🤖 ${input.description || ''}`;
         default:
             return JSON.stringify(input).substring(0, 100);
     }
 }
 
-interface SpawnWorkerResult {
-    exitCode: number;
-    output: string;
-}
-
 /**
  * Claude Codeワーカープロセスを起動し、完了を待つ
+ * @returns {Promise<{exitCode: number, output: string}>}
  */
-export function spawnWorker(
-    folder: string,
-    issueId: string,
-    tracker: ProgressTracker | null,
-    extraPrompt: string | null = null,
-    baseBranch: string | null = null,
-    followUpMessage: string | null = null,
-    userRequest: string | null = null,
-): Promise<SpawnWorkerResult> {
+export function spawnWorker(folder, issueId, tracker, extraPrompt = null) {
     return new Promise((resolve) => {
         // Claude Code内から起動された場合のネスト検出を回避
         const childEnv = { ...process.env };
@@ -490,7 +278,6 @@ export function spawnWorker(
         delete childEnv.CLAUDE_CODE_ENTRYPOINT;
 
         const args = ['./stealth-run.sh', folder, issueId];
-        if (baseBranch) args.push(baseBranch);
         if (extraPrompt) args.push(extraPrompt);
 
         // worktree パスを生成して stealth-run.sh に渡す
@@ -511,12 +298,6 @@ export function spawnWorker(
                 WORKTREE_PATH: worktreePath,
                 SLACK_CHANNEL: tracker?.channel || '',
                 SLACK_THREAD_TS: tracker?.threadTs || '',
-                ...(followUpMessage && {
-                    FOLLOW_UP_MESSAGE: followUpMessage,
-                }),
-                ...(userRequest && {
-                    USER_REQUEST: userRequest,
-                }),
             },
         });
 
@@ -524,12 +305,12 @@ export function spawnWorker(
         let lineBuffer = '';
 
         // PTYからのstream-json(NDJSON)をリアルタイムでパース
-        worker.onData((data: string) => {
+        worker.onData((data) => {
             output += data;
             lineBuffer += data;
 
             const lines = lineBuffer.split('\n');
-            lineBuffer = lines.pop() ?? ''; // 未完成の行はバッファに残す
+            lineBuffer = lines.pop(); // 未完成の行はバッファに残す
 
             for (const line of lines) {
                 // PTYのANSIエスケープシーケンスを除去してからパース
@@ -542,7 +323,7 @@ export function spawnWorker(
             }
         });
 
-        worker.onExit(({ exitCode }: { exitCode: number }) => {
+        worker.onExit(({ exitCode }) => {
             // バッファに残った最後の行を処理
             if (lineBuffer.trim()) {
                 const cleaned = lineBuffer
@@ -557,35 +338,22 @@ export function spawnWorker(
     });
 }
 
-/**
- * 出力から最後のPR URLを抽出する
- * Claude Codeの出力には過去のPR URLが含まれる場合があるため、
- * 最後に出現するURLを返す（新しく作成されたPRが最後に出力されるため）
- */
-export function extractLastPrUrl(output: string): string | null {
-    const prUrlRegex =
-        /https:\/\/(?:github\.com\/[^\s"]+\/pull\/\d+|[^\s"]+\.backlog\.(?:jp|com)\/[^\s"]+\/pullRequests\/\d+)/g;
-    const matches = output.match(prUrlRegex);
-    if (!matches || matches.length === 0) return null;
-    return matches[matches.length - 1];
-}
-
 /** 出力からエラーサマリーを抽出する */
-export function extractErrorSummary(output: string): string {
+export function extractErrorSummary(output) {
     // ANSIエスケープシーケンスを除去
     const cleaned = output.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
 
     // stream-jsonからエラーイベントを探す
     const lines = cleaned.split('\n');
-    const errors: string[] = [];
+    const errors = [];
 
     for (const line of lines) {
         try {
-            const event = JSON.parse(line.trim()) as StreamEvent;
+            const event = JSON.parse(line.trim());
             if (event.type === 'user' && event.message?.content) {
                 for (const block of event.message.content) {
                     if (block.is_error && block.content) {
-                        errors.push(block.content as string);
+                        errors.push(block.content);
                     }
                 }
             }
@@ -620,15 +388,14 @@ export function extractErrorSummary(output: string): string {
     return '原因不明のエラーで終了しました（ログを確認してください）';
 }
 
-app.post('/do', async (req: Request, res: Response) => {
-    const { folder, issueId, baseBranch, userRequest } = parseInput(
-        req.body.text || '',
-    );
+app.post('/do', async (req, res) => {
+    const { folder, issueId } = parseInput(req.body.text || '');
     const channelId = req.body.channel_id;
 
     if (!folder || !issueId) {
-        res.status(400).send('引数不足。例: circus_agent_ecosystem RA_DEV-81');
-        return;
+        return res
+            .status(400)
+            .send('引数不足。例: circus_agent_ecosystem RA_DEV-81');
     }
 
     const isAgent = folder === 'agent';
@@ -661,7 +428,7 @@ app.post('/do', async (req: Request, res: Response) => {
     let attempt = 0;
     let lastExitCode = 0;
     let lastOutput = '';
-    let extraPrompt: string | null = null;
+    let extraPrompt = null;
 
     while (attempt < MAX_RETRIES) {
         attempt++;
@@ -681,9 +448,6 @@ app.post('/do', async (req: Request, res: Response) => {
             issueId,
             tracker,
             extraPrompt,
-            baseBranch || null,
-            null,
-            userRequest || null,
         );
         lastExitCode = exitCode;
         lastOutput = output;
@@ -741,9 +505,11 @@ app.post('/do', async (req: Request, res: Response) => {
 
     // 6. 完了メッセージをスレッドに投稿
     if (channelId && parentTs) {
-        const prUrl = extractLastPrUrl(lastOutput);
-        const prMessage = prUrl
-            ? `\nPRが作成されました: ${prUrl}`
+        const prUrlMatch = lastOutput.match(
+            /https:\/\/github\.com\/[^\s"]+\/pull\/\d+/,
+        );
+        const prMessage = prUrlMatch
+            ? `\nPRが作成されました: ${prUrlMatch[0]}`
             : '\nPRの作成を確認できませんでした。詳細はターミナルのログを確認してください。';
 
         const retryInfo = attempt > 1 ? ` (試行回数: ${attempt})` : '';
@@ -757,81 +523,6 @@ app.post('/do', async (req: Request, res: Response) => {
             );
         } catch (err) {
             console.error('Slackへの通知に失敗しました:', err);
-        }
-    }
-
-    // 7. フォローアップループ: タスク成功後に追加依頼を待機
-    if (lastExitCode === 0 && channelId && parentTs) {
-        const followUpHandler = new FollowUpHandler(channelId, parentTs);
-        const MAX_FOLLOW_UPS = 5;
-        let followUpCount = 0;
-
-        while (followUpCount < MAX_FOLLOW_UPS) {
-            const decision = await followUpHandler.waitForFollowUp(issueLabel);
-
-            if (decision.action === 'end') {
-                console.log(
-                    `${timestamp()} 📋 フォローアップセッション終了: ${decision.message}`,
-                );
-                if (
-                    decision.message !== 'Slackチャンネル/スレッド未設定' &&
-                    decision.message !== 'Slack送信失敗'
-                ) {
-                    await postToSlack(
-                        channelId,
-                        '📋 セッションを終了しました。お疲れ様でした！',
-                        parentTs,
-                    );
-                }
-                break;
-            }
-
-            followUpCount++;
-            console.log(
-                `${timestamp()} 📝 フォローアップ依頼 (${followUpCount}/${MAX_FOLLOW_UPS}): ${decision.message}`,
-            );
-            await postToSlack(
-                channelId,
-                `🔄 追加依頼を実行します (${followUpCount}回目)\n> ${decision.message}`,
-                parentTs,
-            );
-
-            // フォローアップワーカー起動
-            tracker.start();
-
-            const { exitCode: fuExitCode } = await spawnWorker(
-                folder,
-                issueId,
-                tracker,
-                null,
-                baseBranch || null,
-                decision.message,
-            );
-
-            tracker.stop();
-
-            console.log(
-                `\n${timestamp()} ${fuExitCode === 0 ? '✅' : '❌'} フォローアップ完了 (Exit Code: ${fuExitCode})`,
-            );
-
-            const mention = formatMention();
-            await postToSlack(
-                channelId,
-                `${mention}${fuExitCode === 0 ? '✅' : '❌'} 追加依頼の対応が${fuExitCode === 0 ? '完了' : '終了'}しました (Exit Code: ${fuExitCode})`,
-                parentTs,
-            );
-
-            if (fuExitCode !== 0) {
-                break;
-            }
-        }
-
-        if (followUpCount >= MAX_FOLLOW_UPS) {
-            await postToSlack(
-                channelId,
-                `📋 フォローアップの最大回数 (${MAX_FOLLOW_UPS}) に達したためセッションを終了します。`,
-                parentTs,
-            );
         }
     }
 });
