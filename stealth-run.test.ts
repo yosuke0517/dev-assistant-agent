@@ -162,6 +162,61 @@ describe('stealth-run.sh', () => {
         );
     });
 
+    it('worktree prune が worktree 作成前に実行される', async () => {
+        const fs = await import('node:fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        expect(content).toContain('worktree prune');
+        // prune が worktree add より前にあることを確認
+        const pruneIndex = content.indexOf('worktree prune');
+        const addIndex = content.indexOf('worktree add');
+        expect(pruneIndex).toBeLessThan(addIndex);
+    });
+
+    it('worktree ブランチ競合の検出ロジックが含まれる', async () => {
+        const fs = await import('node:fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        expect(content).toContain('WORKTREE_BRANCH_CONFLICT');
+        expect(content).toContain('worktree list --porcelain');
+    });
+
+    it('finegate temp worktree の競合時に自動削除する', async () => {
+        const fs = await import('node:fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        expect(content).toContain('Removing conflicting finegate worktree');
+        expect(content).toContain('/tmp/finegate-worktrees/');
+    });
+
+    it('worktree 競合時にdetached HEAD での作業指示がプロンプトに追加される', async () => {
+        const fs = await import('node:fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        expect(content).toContain('worktree競合への対応');
+        expect(content).toContain('detached HEAD');
+        expect(content).toContain('git push origin HEAD:');
+    });
+
+    it('USER_REQUESTモードで対象ブランチが決定される', async () => {
+        const fs = await import('node:fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        // USER_REQUEST モードでは BASE_BRANCH が TARGET_BRANCH になる
+        expect(content).toContain('if [ -n "$USER_REQUEST" ]; then');
+        expect(content).toContain('TARGET_BRANCH="$BASE_BRANCH"');
+    });
+
+    it('FOLLOW_UP モードで対象ブランチが決定される', async () => {
+        const fs = await import('node:fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        // FOLLOW_UP モードでは feat/fix パターンで検索
+        expect(content).toContain('FOLLOW_UP_MESSAGE');
+        expect(content).toContain('for prefix in "feat" "fix"');
+    });
+
+    it('対象ブランチが存在する場合はそのブランチの先端からworktreeを開始する', async () => {
+        const fs = await import('node:fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        expect(content).toContain('WORKTREE_START="origin/$TARGET_BRANCH"');
+        expect(content).toContain('WORKTREE_START="origin/$BASE_BRANCH"');
+    });
+
     it('非agentプロジェクトのプロンプトにPR作成の指示が含まれる', async () => {
         const fs = await import('node:fs');
         const content = fs.readFileSync(scriptPath, 'utf8');

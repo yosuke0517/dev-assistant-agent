@@ -65,14 +65,65 @@ fi
 # 3. 最新を取得（メインの作業ディレクトリには影響しない）
 git -C "$TARGET_PATH" fetch origin "$BASE_BRANCH"
 
+# 3.5. stale worktree 参照のクリーンアップ
+git -C "$TARGET_PATH" worktree prune 2>/dev/null || true
+
+# 3.6. USER_REQUEST/FOLLOW_UP モードで対象ブランチの競合を検出・解消
+TARGET_BRANCH=""
+if [ -n "$USER_REQUEST" ]; then
+    TARGET_BRANCH="$BASE_BRANCH"
+elif [ -n "$FOLLOW_UP_MESSAGE" ]; then
+    if [ "$IS_SELF_PROJECT" = true ]; then
+        for prefix in "feat" "fix"; do
+            if git -C "$TARGET_PATH" rev-parse --verify "origin/${prefix}/issue-${ISSUE_ID}" >/dev/null 2>&1; then
+                TARGET_BRANCH="${prefix}/issue-${ISSUE_ID}"
+                break
+            fi
+        done
+    else
+        TARGET_BRANCH="feat/${ISSUE_ID}"
+    fi
+fi
+
+WORKTREE_BRANCH_CONFLICT=""
+if [ -n "$TARGET_BRANCH" ]; then
+    # 対象ブランチをfetch
+    git -C "$TARGET_PATH" fetch origin "$TARGET_BRANCH" 2>/dev/null || true
+
+    # 対象ブランチが別のworktreeで使用中か確認
+    CONFLICT_WT=$(git -C "$TARGET_PATH" worktree list --porcelain | awk -v branch="refs/heads/$TARGET_BRANCH" '
+        /^worktree / { wt=substr($0, 10) }
+        /^branch / { if ($2 == branch) print wt }
+    ')
+
+    if [ -n "$CONFLICT_WT" ]; then
+        if echo "$CONFLICT_WT" | grep -q "^/tmp/finegate-worktrees/"; then
+            echo "Removing conflicting finegate worktree: $CONFLICT_WT"
+            git -C "$TARGET_PATH" worktree remove --force "$CONFLICT_WT" 2>/dev/null || rm -rf "$CONFLICT_WT"
+            git -C "$TARGET_PATH" worktree prune 2>/dev/null || true
+        else
+            echo "Warning: Branch '$TARGET_BRANCH' is already checked out at: $CONFLICT_WT"
+            WORKTREE_BRANCH_CONFLICT="$TARGET_BRANCH"
+        fi
+    fi
+fi
+
 # 4. git worktree で一時作業ディレクトリを作成
 REPO_NAME=$(basename "$TARGET_PATH")
 if [ -z "$WORKTREE_PATH" ]; then
     WORKTREE_PATH="/tmp/finegate-worktrees/${REPO_NAME}-$(date +%s)"
 fi
 mkdir -p "$(dirname "$WORKTREE_PATH")"
+
+# 対象ブランチが特定できている場合はそのブランチの先端から開始
+if [ -n "$TARGET_BRANCH" ] && git -C "$TARGET_PATH" rev-parse --verify "origin/$TARGET_BRANCH" >/dev/null 2>&1; then
+    WORKTREE_START="origin/$TARGET_BRANCH"
+else
+    WORKTREE_START="origin/$BASE_BRANCH"
+fi
+
 echo "Creating worktree at: $WORKTREE_PATH"
-git -C "$TARGET_PATH" worktree add --detach "$WORKTREE_PATH" "origin/$BASE_BRANCH"
+git -C "$TARGET_PATH" worktree add --detach "$WORKTREE_PATH" "$WORKTREE_START"
 
 # 5. MCP設定ファイルを動的に生成（ask_human ツール用）
 MCP_CONFIG="/tmp/finegate-mcp-config-$$.json"
@@ -323,6 +374,19 @@ if [ -z "$FOLLOW_UP_MESSAGE" ] && [ -n "$EXTRA_PROMPT" ]; then
 
 【ユーザーからの追加指示】
 ${EXTRA_PROMPT}"
+fi
+
+# worktree ブランチ競合時の追加指示
+if [ -n "$WORKTREE_BRANCH_CONFLICT" ]; then
+    PROMPT="${PROMPT}
+
+【重要：worktree競合への対応】
+ブランチ '${WORKTREE_BRANCH_CONFLICT}' は別のworktreeで使用中のため、git checkout でそのブランチに切り替えることはできません。
+以下の方法で対応してください：
+- 現在のdetached HEADの状態のまま作業してください（すでにブランチの最新コミットにいます）
+- コミットは通常通り行えます
+- pushの際は \`git push origin HEAD:${WORKTREE_BRANCH_CONFLICT}\` を使用してください
+- \`git checkout ${WORKTREE_BRANCH_CONFLICT}\` は絶対に実行しないでください（エラーになります）"
 fi
 
 claude --dangerously-skip-permissions \
