@@ -324,6 +324,293 @@ describe('stealth-run.sh', () => {
         expect(result).toContain('fallback_to_auto_detection');
     });
 
+    it('MCP設定にグローバルMCPサーバーをマージするロジックが含まれる', async () => {
+        const fs = await import('node:fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        // グローバルMCP設定の読み込み
+        expect(content).toContain('~/.claude/.mcp.json');
+        // プロジェクトレベルMCP設定の読み込み
+        expect(content).toContain('.mcp.json');
+        // マージ処理 (Object.assign)
+        expect(content).toContain('Object.assign(mcpServers');
+        // slack-humanが最高優先度で設定される
+        expect(content).toContain("mcpServers['slack-human']");
+    });
+
+    it('MCP設定マージでグローバル→プロジェクト→セッションの優先順位を持つ', async () => {
+        const fs = await import('node:fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        // グローバル（最低優先度）→プロジェクト（中優先度）→セッション（最高優先度）の順序
+        const globalIndex = content.indexOf('グローバルMCP設定');
+        const projectIndex = content.indexOf('プロジェクトレベルMCP設定');
+        const sessionIndex = content.indexOf('セッション固有のslack-human');
+        expect(globalIndex).toBeGreaterThan(-1);
+        expect(projectIndex).toBeGreaterThan(globalIndex);
+        expect(sessionIndex).toBeGreaterThan(projectIndex);
+    });
+
+    it('MCP設定マージがNode.jsで正しく動作する（グローバルMCPなし）', () => {
+        const fs = require('node:fs');
+        const tmpDir = `/tmp/finegate-mcp-test-${Date.now()}`;
+        const outputPath = `${tmpDir}/mcp-config.json`;
+        fs.mkdirSync(tmpDir, { recursive: true });
+
+        try {
+            // グローバル・プロジェクトMCPが存在しない状態でマージスクリプトを実行
+            const mergeScript = `
+                MCP_SCRIPT_DIR="/dummy/script/dir" \
+                MCP_TARGET_PATH="/tmp/nonexistent-project" \
+                MCP_OUTPUT="${outputPath}" \
+                HOME="${tmpDir}" \
+                SLACK_BOT_TOKEN="test-token" \
+                SLACK_CHANNEL="C123" \
+                SLACK_THREAD_TS="1234.5678" \
+                OWNER_SLACK_MEMBER_ID="U999" \
+                node -e "
+const fs = require('fs');
+const path = require('path');
+const scriptDir = process.env.MCP_SCRIPT_DIR;
+const targetPath = process.env.MCP_TARGET_PATH;
+const output = process.env.MCP_OUTPUT;
+let mcpServers = {};
+const globalPath = path.join(process.env.HOME || '', '.claude', '.mcp.json');
+try {
+    if (fs.existsSync(globalPath)) {
+        const g = JSON.parse(fs.readFileSync(globalPath, 'utf-8'));
+        if (g.mcpServers) Object.assign(mcpServers, g.mcpServers);
+    }
+} catch (e) { console.error('Warning:', e.message); }
+const projectPath = path.join(targetPath, '.mcp.json');
+try {
+    if (fs.existsSync(projectPath)) {
+        const p = JSON.parse(fs.readFileSync(projectPath, 'utf-8'));
+        if (p.mcpServers) Object.assign(mcpServers, p.mcpServers);
+    }
+} catch (e) { console.error('Warning:', e.message); }
+mcpServers['slack-human'] = {
+    command: 'node',
+    args: [path.join(scriptDir, 'dist/mcp-servers/slack-human-interaction/index.js')],
+    env: {
+        SLACK_BOT_TOKEN: process.env.SLACK_BOT_TOKEN || '',
+        SLACK_CHANNEL: process.env.SLACK_CHANNEL || '',
+        SLACK_THREAD_TS: process.env.SLACK_THREAD_TS || '',
+        OWNER_SLACK_MEMBER_ID: process.env.OWNER_SLACK_MEMBER_ID || ''
+    }
+};
+fs.writeFileSync(output, JSON.stringify({ mcpServers }, null, 2));
+"
+            `;
+            execSync(mergeScript, { encoding: 'utf8', stdio: 'pipe' });
+            const config = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
+
+            // slack-humanのみが含まれる
+            expect(Object.keys(config.mcpServers)).toEqual(['slack-human']);
+            expect(config.mcpServers['slack-human'].env.SLACK_BOT_TOKEN).toBe(
+                'test-token',
+            );
+            expect(config.mcpServers['slack-human'].env.SLACK_CHANNEL).toBe(
+                'C123',
+            );
+        } finally {
+            fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+    });
+
+    it('MCP設定マージがグローバルMCPを正しく取り込む', () => {
+        const fs = require('node:fs');
+        const tmpDir = `/tmp/finegate-mcp-test-${Date.now()}`;
+        const outputPath = `${tmpDir}/mcp-config.json`;
+        const globalDir = `${tmpDir}/.claude`;
+        fs.mkdirSync(globalDir, { recursive: true });
+
+        // グローバルMCP設定を作成
+        fs.writeFileSync(
+            `${globalDir}/.mcp.json`,
+            JSON.stringify({
+                mcpServers: {
+                    backlog: {
+                        command: 'npx',
+                        args: ['backlog-mcp-server'],
+                        env: { BACKLOG_API_KEY: 'test-key' },
+                    },
+                    github: {
+                        command: 'npx',
+                        args: ['-y', '@modelcontextprotocol/server-github'],
+                        env: { GITHUB_PERSONAL_ACCESS_TOKEN: 'ghp_test' },
+                    },
+                },
+            }),
+        );
+
+        try {
+            const mergeScript = `
+                MCP_SCRIPT_DIR="/dummy/script/dir" \
+                MCP_TARGET_PATH="/tmp/nonexistent-project" \
+                MCP_OUTPUT="${outputPath}" \
+                HOME="${tmpDir}" \
+                SLACK_BOT_TOKEN="test-token" \
+                SLACK_CHANNEL="C123" \
+                SLACK_THREAD_TS="1234.5678" \
+                OWNER_SLACK_MEMBER_ID="U999" \
+                node -e "
+const fs = require('fs');
+const path = require('path');
+const scriptDir = process.env.MCP_SCRIPT_DIR;
+const targetPath = process.env.MCP_TARGET_PATH;
+const output = process.env.MCP_OUTPUT;
+let mcpServers = {};
+const globalPath = path.join(process.env.HOME || '', '.claude', '.mcp.json');
+try {
+    if (fs.existsSync(globalPath)) {
+        const g = JSON.parse(fs.readFileSync(globalPath, 'utf-8'));
+        if (g.mcpServers) Object.assign(mcpServers, g.mcpServers);
+    }
+} catch (e) { console.error('Warning:', e.message); }
+const projectPath = path.join(targetPath, '.mcp.json');
+try {
+    if (fs.existsSync(projectPath)) {
+        const p = JSON.parse(fs.readFileSync(projectPath, 'utf-8'));
+        if (p.mcpServers) Object.assign(mcpServers, p.mcpServers);
+    }
+} catch (e) { console.error('Warning:', e.message); }
+mcpServers['slack-human'] = {
+    command: 'node',
+    args: [path.join(scriptDir, 'dist/mcp-servers/slack-human-interaction/index.js')],
+    env: {
+        SLACK_BOT_TOKEN: process.env.SLACK_BOT_TOKEN || '',
+        SLACK_CHANNEL: process.env.SLACK_CHANNEL || '',
+        SLACK_THREAD_TS: process.env.SLACK_THREAD_TS || '',
+        OWNER_SLACK_MEMBER_ID: process.env.OWNER_SLACK_MEMBER_ID || ''
+    }
+};
+fs.writeFileSync(output, JSON.stringify({ mcpServers }, null, 2));
+"
+            `;
+            execSync(mergeScript, { encoding: 'utf8', stdio: 'pipe' });
+            const config = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
+
+            // グローバルMCPサーバーが含まれている
+            expect(config.mcpServers.backlog).toBeDefined();
+            expect(config.mcpServers.backlog.env.BACKLOG_API_KEY).toBe(
+                'test-key',
+            );
+            expect(config.mcpServers.github).toBeDefined();
+            expect(
+                config.mcpServers.github.env.GITHUB_PERSONAL_ACCESS_TOKEN,
+            ).toBe('ghp_test');
+            // slack-humanも含まれている
+            expect(config.mcpServers['slack-human']).toBeDefined();
+            expect(config.mcpServers['slack-human'].env.SLACK_BOT_TOKEN).toBe(
+                'test-token',
+            );
+        } finally {
+            fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+    });
+
+    it('MCP設定マージでプロジェクトMCPがグローバルMCPを上書きする', () => {
+        const fs = require('node:fs');
+        const tmpDir = `/tmp/finegate-mcp-test-${Date.now()}`;
+        const outputPath = `${tmpDir}/mcp-config.json`;
+        const globalDir = `${tmpDir}/.claude`;
+        const projectDir = `${tmpDir}/project`;
+        fs.mkdirSync(globalDir, { recursive: true });
+        fs.mkdirSync(projectDir, { recursive: true });
+
+        // グローバルMCP設定
+        fs.writeFileSync(
+            `${globalDir}/.mcp.json`,
+            JSON.stringify({
+                mcpServers: {
+                    backlog: {
+                        command: 'npx',
+                        args: ['backlog-mcp-server'],
+                        env: { BACKLOG_API_KEY: 'global-key' },
+                    },
+                },
+            }),
+        );
+
+        // プロジェクトレベルMCP設定（backlogを上書き）
+        fs.writeFileSync(
+            `${projectDir}/.mcp.json`,
+            JSON.stringify({
+                mcpServers: {
+                    backlog: {
+                        command: 'npx',
+                        args: ['backlog-mcp-server'],
+                        env: { BACKLOG_API_KEY: 'project-key' },
+                    },
+                    figma: {
+                        command: 'npx',
+                        args: ['figma-mcp'],
+                        env: { FIGMA_TOKEN: 'fig-test' },
+                    },
+                },
+            }),
+        );
+
+        try {
+            const mergeScript = `
+                MCP_SCRIPT_DIR="/dummy/script/dir" \
+                MCP_TARGET_PATH="${projectDir}" \
+                MCP_OUTPUT="${outputPath}" \
+                HOME="${tmpDir}" \
+                SLACK_BOT_TOKEN="test-token" \
+                SLACK_CHANNEL="C123" \
+                SLACK_THREAD_TS="1234.5678" \
+                OWNER_SLACK_MEMBER_ID="U999" \
+                node -e "
+const fs = require('fs');
+const path = require('path');
+const scriptDir = process.env.MCP_SCRIPT_DIR;
+const targetPath = process.env.MCP_TARGET_PATH;
+const output = process.env.MCP_OUTPUT;
+let mcpServers = {};
+const globalPath = path.join(process.env.HOME || '', '.claude', '.mcp.json');
+try {
+    if (fs.existsSync(globalPath)) {
+        const g = JSON.parse(fs.readFileSync(globalPath, 'utf-8'));
+        if (g.mcpServers) Object.assign(mcpServers, g.mcpServers);
+    }
+} catch (e) { console.error('Warning:', e.message); }
+const projectPath = path.join(targetPath, '.mcp.json');
+try {
+    if (fs.existsSync(projectPath)) {
+        const p = JSON.parse(fs.readFileSync(projectPath, 'utf-8'));
+        if (p.mcpServers) Object.assign(mcpServers, p.mcpServers);
+    }
+} catch (e) { console.error('Warning:', e.message); }
+mcpServers['slack-human'] = {
+    command: 'node',
+    args: [path.join(scriptDir, 'dist/mcp-servers/slack-human-interaction/index.js')],
+    env: {
+        SLACK_BOT_TOKEN: process.env.SLACK_BOT_TOKEN || '',
+        SLACK_CHANNEL: process.env.SLACK_CHANNEL || '',
+        SLACK_THREAD_TS: process.env.SLACK_THREAD_TS || '',
+        OWNER_SLACK_MEMBER_ID: process.env.OWNER_SLACK_MEMBER_ID || ''
+    }
+};
+fs.writeFileSync(output, JSON.stringify({ mcpServers }, null, 2));
+"
+            `;
+            execSync(mergeScript, { encoding: 'utf8', stdio: 'pipe' });
+            const config = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
+
+            // プロジェクトMCPがグローバルMCPを上書きしている
+            expect(config.mcpServers.backlog.env.BACKLOG_API_KEY).toBe(
+                'project-key',
+            );
+            // プロジェクト固有のMCPも含まれている
+            expect(config.mcpServers.figma).toBeDefined();
+            expect(config.mcpServers.figma.env.FIGMA_TOKEN).toBe('fig-test');
+            // slack-humanは常に含まれる
+            expect(config.mcpServers['slack-human']).toBeDefined();
+        } finally {
+            fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+    });
+
     it('ディレクトリが存在する場合、最初のチェックは通過する（git操作前まで）', () => {
         // 実際に存在するディレクトリ（カレントディレクトリ）を使用
         const _existingFolder = '.';
