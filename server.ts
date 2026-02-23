@@ -13,6 +13,8 @@ import {
 export { formatMention, postToSlack, waitForSlackReply };
 export type { FetchFn, SlackReply, WaitForSlackReplyOptions };
 
+type PostFn = typeof postToSlack;
+
 const app = express();
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
@@ -159,8 +161,6 @@ export function processStreamEvent(
 
     return event;
 }
-
-type PostFn = typeof postToSlack;
 
 /**
  * Slack進捗通知用のトラッカー
@@ -319,6 +319,93 @@ export class InteractiveHandler {
     }
 }
 
+interface FollowUpHandlerOptions {
+    postFn?: PostFn;
+    waitReplyFn?: typeof waitForSlackReply;
+    timeoutMs?: number;
+}
+
+interface FollowUpDecision {
+    action: 'follow_up' | 'end';
+    message: string;
+}
+
+/**
+ * タスク完了後にSlackスレッドでフォローアップ（追加依頼）を待つハンドラー
+ */
+export class FollowUpHandler {
+    channel: string | null;
+    threadTs: string | null;
+    private _post: PostFn;
+    private _waitReply: typeof waitForSlackReply;
+    timeoutMs: number;
+
+    constructor(
+        channel: string | null,
+        threadTs: string | null,
+        options: FollowUpHandlerOptions = {},
+    ) {
+        this.channel = channel;
+        this.threadTs = threadTs;
+        this._post = options.postFn || postToSlack;
+        this._waitReply = options.waitReplyFn || waitForSlackReply;
+        this.timeoutMs = options.timeoutMs || 1_800_000;
+    }
+
+    /**
+     * フォローアップの依頼をSlackスレッドで待機する
+     */
+    async waitForFollowUp(issueLabel: string): Promise<FollowUpDecision> {
+        if (!this.channel || !this.threadTs) {
+            return {
+                action: 'end',
+                message: 'Slackチャンネル/スレッド未設定',
+            };
+        }
+
+        const mention = formatMention();
+        const prompt = [
+            `${mention}💡 *${issueLabel}* の対応が完了しました。追加の依頼があればこのスレッドに返信してください。`,
+            '',
+            '• 修正や追加の依頼内容を自由に記述してください',
+            '• `終了` または `end` → セッションを終了',
+            '',
+            `_${Math.floor(this.timeoutMs / 60_000)}分以内に返信がない場合は自動でセッションを終了します_`,
+        ].join('\n');
+
+        const questionTs = await this._post(
+            this.channel,
+            prompt,
+            this.threadTs,
+        );
+        if (!questionTs) {
+            return { action: 'end', message: 'Slack送信失敗' };
+        }
+
+        console.log(`${timestamp()} 💡 フォローアップの返信を待機中...`);
+
+        const reply = await this._waitReply(
+            this.channel,
+            this.threadTs,
+            questionTs,
+            {
+                timeoutMs: this.timeoutMs,
+            },
+        );
+
+        if (!reply) {
+            return { action: 'end', message: 'タイムアウト（返信なし）' };
+        }
+
+        const normalized = reply.text.trim().toLowerCase();
+        if (normalized === '終了' || normalized === 'end') {
+            return { action: 'end', message: reply.text };
+        }
+
+        return { action: 'follow_up', message: reply.text };
+    }
+}
+
 function summarizeToolInput(
     toolName: string,
     input?: Record<string, unknown>,
@@ -358,6 +445,7 @@ export function spawnWorker(
     tracker: ProgressTracker | null,
     extraPrompt: string | null = null,
     baseBranch: string | null = null,
+    followUpMessage: string | null = null,
 ): Promise<SpawnWorkerResult> {
     return new Promise((resolve) => {
         // Claude Code内から起動された場合のネスト検出を回避
@@ -388,6 +476,9 @@ export function spawnWorker(
                 WORKTREE_PATH: worktreePath,
                 SLACK_CHANNEL: tracker?.channel || '',
                 SLACK_THREAD_TS: tracker?.threadTs || '',
+                ...(followUpMessage && {
+                    FOLLOW_UP_MESSAGE: followUpMessage,
+                }),
             },
         });
 
@@ -594,10 +685,11 @@ app.post('/do', async (req: Request, res: Response) => {
     tracker.stop();
 
     // 6. 完了メッセージをスレッドに投稿
+    const prUrlRegex =
+        /https:\/\/(?:github\.com\/[^\s"]+\/pull\/\d+|[^\s"]+\.backlog\.(?:jp|com)\/[^\s"]+\/pullRequests\/\d+)/;
+
     if (channelId && parentTs) {
-        const prUrlMatch = lastOutput.match(
-            /https:\/\/(?:github\.com\/[^\s"]+\/pull\/\d+|[^\s"]+\.backlog\.(?:jp|com)\/[^\s"]+\/pullRequests\/\d+)/,
-        );
+        const prUrlMatch = lastOutput.match(prUrlRegex);
         const prMessage = prUrlMatch
             ? `\nPRが作成されました: ${prUrlMatch[0]}`
             : '\nPRの作成を確認できませんでした。詳細はターミナルのログを確認してください。';
@@ -613,6 +705,81 @@ app.post('/do', async (req: Request, res: Response) => {
             );
         } catch (err) {
             console.error('Slackへの通知に失敗しました:', err);
+        }
+    }
+
+    // 7. フォローアップループ: タスク成功後に追加依頼を待機
+    if (lastExitCode === 0 && channelId && parentTs) {
+        const followUpHandler = new FollowUpHandler(channelId, parentTs);
+        const MAX_FOLLOW_UPS = 5;
+        let followUpCount = 0;
+
+        while (followUpCount < MAX_FOLLOW_UPS) {
+            const decision = await followUpHandler.waitForFollowUp(issueLabel);
+
+            if (decision.action === 'end') {
+                console.log(
+                    `${timestamp()} 📋 フォローアップセッション終了: ${decision.message}`,
+                );
+                if (
+                    decision.message !== 'Slackチャンネル/スレッド未設定' &&
+                    decision.message !== 'Slack送信失敗'
+                ) {
+                    await postToSlack(
+                        channelId,
+                        '📋 セッションを終了しました。お疲れ様でした！',
+                        parentTs,
+                    );
+                }
+                break;
+            }
+
+            followUpCount++;
+            console.log(
+                `${timestamp()} 📝 フォローアップ依頼 (${followUpCount}/${MAX_FOLLOW_UPS}): ${decision.message}`,
+            );
+            await postToSlack(
+                channelId,
+                `🔄 追加依頼を実行します (${followUpCount}回目)\n> ${decision.message}`,
+                parentTs,
+            );
+
+            // フォローアップワーカー起動
+            tracker.start();
+
+            const { exitCode: fuExitCode } = await spawnWorker(
+                folder,
+                issueId,
+                tracker,
+                null,
+                baseBranch || null,
+                decision.message,
+            );
+
+            tracker.stop();
+
+            console.log(
+                `\n${timestamp()} ${fuExitCode === 0 ? '✅' : '❌'} フォローアップ完了 (Exit Code: ${fuExitCode})`,
+            );
+
+            const mention = formatMention();
+            await postToSlack(
+                channelId,
+                `${mention}${fuExitCode === 0 ? '✅' : '❌'} 追加依頼の対応が${fuExitCode === 0 ? '完了' : '終了'}しました (Exit Code: ${fuExitCode})`,
+                parentTs,
+            );
+
+            if (fuExitCode !== 0) {
+                break;
+            }
+        }
+
+        if (followUpCount >= MAX_FOLLOW_UPS) {
+            await postToSlack(
+                channelId,
+                `📋 フォローアップの最大回数 (${MAX_FOLLOW_UPS}) に達したためセッションを終了します。`,
+                parentTs,
+            );
         }
     }
 });

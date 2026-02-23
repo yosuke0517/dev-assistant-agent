@@ -147,7 +147,62 @@ git config user.name "$GIT_USER_NAME"
 git config user.email "$GIT_USER_EMAIL"
 
 # 9. エージェントによる実装実行
-if [ "$IS_SELF_PROJECT" = true ]; then
+if [ -n "$FOLLOW_UP_MESSAGE" ]; then
+    # フォローアップモード: 既存ブランチで追加依頼を処理
+    if [ "$IS_SELF_PROJECT" = true ]; then
+        echo "Claude Code starting follow-up for GitHub Issue: #${ISSUE_ID}..."
+        PROMPT="前回のタスクでGitHub Issue #${ISSUE_ID}に対する実装を行い、PRを作成しました。
+ユーザーから追加の依頼があります。
+
+【追加依頼】
+${FOLLOW_UP_MESSAGE}
+
+以下の手順で作業してください：
+1. git fetch origin を実行してリモートの最新状態を取得してください
+2. 既存の作業ブランチ（feat/issue-${ISSUE_ID} または fix/issue-${ISSUE_ID}）をチェックアウトしてください
+3. 追加依頼の内容を実装してください
+4. テストをパスさせてください
+5. 変更をコミットしてpushしてください（既存のPRに自動反映されます）
+
+【重要】新しいPRは作成しないでください。既存のブランチへのpushで自動的にPRが更新されます。
+【重要】絶対に ${BASE_BRANCH} ブランチへ直接 push しないでください。
+
+【重要】ask_human MCPツールは --mcp-config で事前設定済みです。MCPの設定ファイルを調査する必要はありません。直接呼び出してください。
+
+【重要】実装中に以下のケースでは、必ず ask_human MCPツールを使用してSlackで確認してください（※ AskUserQuestion は使用禁止。必ず ask_human を使うこと）:
+- 仕様の解釈が複数通りある場合
+- 課題の記述が曖昧で実装方針が定まらない場合
+- 破壊的な変更（既存APIの変更、DB スキーマ変更等）を行う前
+- 設計判断で迷った場合（例: このロジックはどこに置くべきか）
+勝手に解釈して進めず、必ず確認を取ってから実装してください。"
+    else
+        echo "Claude Code starting follow-up for Backlog Issue: $ISSUE_ID..."
+        PROMPT="前回のタスクで課題 ${ISSUE_ID} に対する実装を行い、PRを作成しました。
+ユーザーから追加の依頼があります。
+
+【追加依頼】
+${FOLLOW_UP_MESSAGE}
+
+以下の手順で作業してください：
+1. git fetch origin を実行してリモートの最新状態を取得してください
+2. 既存の作業ブランチ（feat/${ISSUE_ID}）をチェックアウトしてください
+3. 追加依頼の内容を実装してください
+4. テストをパスさせてください
+5. 変更をコミットしてpushしてください（既存のPRに自動反映されます）
+
+【重要】新しいPRは作成しないでください。pushで既存のPRが自動更新されます。
+【重要】絶対に ${BASE_BRANCH} ブランチへ直接 push しないでください。
+
+【重要】ask_human MCPツールは --mcp-config で事前設定済みです。MCPの設定ファイルを調査する必要はありません。直接呼び出してください。
+
+【重要】実装中に以下のケースでは、必ず ask_human MCPツールを使用してSlackで確認してください（※ AskUserQuestion は使用禁止。必ず ask_human を使うこと）:
+- 仕様の解釈が複数通りある場合
+- 課題の記述が曖昧で実装方針が定まらない場合
+- 破壊的な変更（既存APIの変更、DB スキーマ変更等）を行う前
+- 設計判断で迷った場合（例: このロジックはどこに置くべきか）
+勝手に解釈して進めず、必ず確認を取ってから実装してください。"
+    fi
+elif [ "$IS_SELF_PROJECT" = true ]; then
     echo "Claude Code starting for GitHub Issue: #${ISSUE_ID}..."
     PROMPT="以下のSTEPに従って作業してください。
 
@@ -200,8 +255,8 @@ PRのタイトルは課題内容に基づいて簡潔に記述し、bodyには�
 勝手に解釈して進めず、必ず確認を取ってから実装してください。"
 fi
 
-# ユーザーからの追加指示がある場合はプロンプトに付与
-if [ -n "$EXTRA_PROMPT" ]; then
+# ユーザーからの追加指示がある場合はプロンプトに付与（通常モードのみ）
+if [ -z "$FOLLOW_UP_MESSAGE" ] && [ -n "$EXTRA_PROMPT" ]; then
     PROMPT="${PROMPT}
 
 【ユーザーからの追加指示】
