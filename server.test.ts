@@ -141,6 +141,28 @@ describe('parseInput', () => {
         });
     });
 
+    it('第3引数が文字列 "undefined" の場合、baseBranch は undefined になる', () => {
+        const result = parseInput('circus_backend RA_DEV-91 undefined');
+        expect(result).toEqual({
+            folder: 'circus_backend',
+            issueId: 'RA_DEV-91',
+            baseBranch: undefined,
+            userRequest: undefined,
+        });
+    });
+
+    it('第3引数が "undefined" でも第4引数のユーザー要望は正しくパースできる', () => {
+        const result = parseInput(
+            'circus_agent_ecosystem RA_DEV-91 undefined レポートを作成してpushして欲しい',
+        );
+        expect(result).toEqual({
+            folder: 'circus_agent_ecosystem',
+            issueId: 'RA_DEV-91',
+            baseBranch: undefined,
+            userRequest: 'レポートを作成してpushして欲しい',
+        });
+    });
+
     it('agentキーワードでもユーザー要望を受け取れる', () => {
         const result = parseInput(
             'agent 46 feat/issue-46 テストを追加してほしい',

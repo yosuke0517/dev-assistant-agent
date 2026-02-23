@@ -194,12 +194,43 @@ describe('stealth-run.sh', () => {
         expect(content).toContain('git push origin HEAD:');
     });
 
+    it('BASE_BRANCH_ARG が "undefined" の場合に空文字に置換されるロジックが存在する', async () => {
+        const fs = await import('node:fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        expect(content).toContain(
+            'if [ "$BASE_BRANCH_ARG" = "undefined" ]; then',
+        );
+        expect(content).toContain('BASE_BRANCH_ARG=""');
+    });
+
     it('USER_REQUESTモードで対象ブランチが決定される', async () => {
         const fs = await import('node:fs');
         const content = fs.readFileSync(scriptPath, 'utf8');
-        // USER_REQUEST モードでは BASE_BRANCH が TARGET_BRANCH になる
+        // USER_REQUEST モードでは明示指定時は BASE_BRANCH が TARGET_BRANCH になる
         expect(content).toContain('if [ -n "$USER_REQUEST" ]; then');
         expect(content).toContain('TARGET_BRANCH="$BASE_BRANCH"');
+    });
+
+    it('USER_REQUESTモードでブランチ未指定時にフィーチャーブランチを自動検出する', async () => {
+        const fs = await import('node:fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        // ブランチ未指定時の自動検出ロジック
+        expect(content).toContain(
+            'Could not find existing feature branch for issue',
+        );
+        expect(content).toContain('Work branch (auto-detected)');
+        // WORK_BRANCH 変数が使用されている
+        expect(content).toContain('WORK_BRANCH=');
+    });
+
+    it('USER_REQUESTモードのプロンプトで WORK_BRANCH が使用される', async () => {
+        const fs = await import('node:fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        // USER_REQUEST プロンプトで WORK_BRANCH が使用される
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: shell variable reference, not JS template
+        expect(content).toContain('${WORK_BRANCH}（既存ブランチ）');
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: shell variable reference, not JS template
+        expect(content).toContain('${WORK_BRANCH} をチェックアウト');
     });
 
     it('FOLLOW_UP モードで対象ブランチが決定される', async () => {
@@ -245,6 +276,23 @@ describe('stealth-run.sh', () => {
         const baseMatches = content.match(/--base \$\{BASE_BRANCH\}/g);
         expect(baseMatches).not.toBeNull();
         expect(baseMatches!.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('BASE_BRANCH_ARG に "undefined" を渡すとブランチ検証エラーにならない', () => {
+        // "undefined" がフィルタされることで、ブランチ検証のパスに入らないことを確認
+        const filterScript = `
+            BASE_BRANCH_ARG="undefined"
+            if [ "$BASE_BRANCH_ARG" = "undefined" ]; then
+                BASE_BRANCH_ARG=""
+            fi
+            if [ -n "$BASE_BRANCH_ARG" ]; then
+                echo "branch_specified:$BASE_BRANCH_ARG"
+            else
+                echo "branch_not_specified"
+            fi
+        `;
+        const result = execSync(filterScript, { encoding: 'utf8' });
+        expect(result.trim()).toBe('branch_not_specified');
     });
 
     it('ディレクトリが存在する場合、最初のチェックは通過する（git操作前まで）', () => {

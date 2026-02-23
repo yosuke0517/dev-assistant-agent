@@ -15,6 +15,11 @@ ISSUE_ID=$2       # 例: PROJ-123 または GitHub Issue番号
 BASE_BRANCH_ARG=$3 # オプション: ベースブランチ指定（例: develop）
 EXTRA_PROMPT=$4    # オプション: ユーザーからの追加指示（リトライ時に使用）
 
+# "undefined" 文字列はフロントエンド等で値未設定時に渡されることがあるため除外
+if [ "$BASE_BRANCH_ARG" = "undefined" ]; then
+    BASE_BRANCH_ARG=""
+fi
+
 # 環境変数チェック
 if [ -z "$WORKSPACE_ROOT" ] || [ -z "$AGENT_PROJECT_PATH" ]; then
     echo "Error: WORKSPACE_ROOT and AGENT_PROJECT_PATH must be set in .env"
@@ -70,8 +75,37 @@ git -C "$TARGET_PATH" worktree prune 2>/dev/null || true
 
 # 3.6. USER_REQUEST/FOLLOW_UP モードで対象ブランチの競合を検出・解消
 TARGET_BRANCH=""
+WORK_BRANCH=""
 if [ -n "$USER_REQUEST" ]; then
-    TARGET_BRANCH="$BASE_BRANCH"
+    if [ -n "$BASE_BRANCH_ARG" ]; then
+        # 明示的にブランチが指定された場合はそのまま使用
+        TARGET_BRANCH="$BASE_BRANCH"
+        WORK_BRANCH="$BASE_BRANCH"
+    else
+        # ブランチ未指定: 課題IDから既存のフィーチャーブランチを自動検出
+        if [ "$IS_SELF_PROJECT" = true ]; then
+            for prefix in "feat" "fix"; do
+                git -C "$TARGET_PATH" fetch origin "${prefix}/issue-${ISSUE_ID}" 2>/dev/null || true
+                if git -C "$TARGET_PATH" rev-parse --verify "origin/${prefix}/issue-${ISSUE_ID}" >/dev/null 2>&1; then
+                    TARGET_BRANCH="${prefix}/issue-${ISSUE_ID}"
+                    WORK_BRANCH="${prefix}/issue-${ISSUE_ID}"
+                    break
+                fi
+            done
+        else
+            git -C "$TARGET_PATH" fetch origin "feat/${ISSUE_ID}" 2>/dev/null || true
+            if git -C "$TARGET_PATH" rev-parse --verify "origin/feat/${ISSUE_ID}" >/dev/null 2>&1; then
+                TARGET_BRANCH="feat/${ISSUE_ID}"
+                WORK_BRANCH="feat/${ISSUE_ID}"
+            fi
+        fi
+
+        if [ -z "$WORK_BRANCH" ]; then
+            echo "Error: Could not find existing feature branch for issue ${ISSUE_ID}. Please specify branch explicitly as 3rd argument."
+            exit 1
+        fi
+        echo "Work branch (auto-detected): $WORK_BRANCH"
+    fi
 elif [ -n "$FOLLOW_UP_MESSAGE" ]; then
     if [ "$IS_SELF_PROJECT" = true ]; then
         for prefix in "feat" "fix"; do
@@ -255,19 +289,20 @@ ${FOLLOW_UP_MESSAGE}
     fi
 elif [ -n "$USER_REQUEST" ]; then
     # ユーザー要望モード: 既存ブランチで要望を実装（オープン済みPRの修正等）
+    # WORK_BRANCH: 明示指定時は BASE_BRANCH、未指定時は自動検出されたブランチ
     if [ "$IS_SELF_PROJECT" = true ]; then
-        echo "Claude Code starting user request for GitHub Issue: #${ISSUE_ID} on branch ${BASE_BRANCH}..."
+        echo "Claude Code starting user request for GitHub Issue: #${ISSUE_ID} on branch ${WORK_BRANCH}..."
         PROMPT="以下の作業を実行してください。
 
 【リポジトリ】yosuke0517/dev-assistant-agent
-【対象ブランチ】${BASE_BRANCH}（既存ブランチ）
+【対象ブランチ】${WORK_BRANCH}（既存ブランチ）
 【課題ID】GitHub Issue #${ISSUE_ID}
 【ユーザーの要望】
 ${USER_REQUEST}
 
 以下の手順で作業してください：
 1. git fetch origin を実行してリモートの最新状態を取得してください
-2. ブランチ ${BASE_BRANCH} をチェックアウトしてください
+2. ブランチ ${WORK_BRANCH} をチェックアウトしてください
 3. ユーザーの要望を実装してください
 4. テストをパスさせてください
 5. 変更をコミットしてpushしてください（既存のPRに自動反映されます）
@@ -284,17 +319,17 @@ ${USER_REQUEST}
 - 設計判断で迷った場合（例: このロジックはどこに置くべきか）
 勝手に解釈して進めず、必ず確認を取ってから実装してください。"
     else
-        echo "Claude Code starting user request for Backlog Issue: ${ISSUE_ID} on branch ${BASE_BRANCH}..."
+        echo "Claude Code starting user request for Backlog Issue: ${ISSUE_ID} on branch ${WORK_BRANCH}..."
         PROMPT="以下の作業を実行してください。
 
-【対象ブランチ】${BASE_BRANCH}（既存ブランチ）
+【対象ブランチ】${WORK_BRANCH}（既存ブランチ）
 【課題ID】${ISSUE_ID}
 【ユーザーの要望】
 ${USER_REQUEST}
 
 以下の手順で作業してください：
 1. git fetch origin を実行してリモートの最新状態を取得してください
-2. ブランチ ${BASE_BRANCH} をチェックアウトしてください
+2. ブランチ ${WORK_BRANCH} をチェックアウトしてください
 3. ユーザーの要望を実装してください
 4. テストをパスさせてください
 5. 変更をコミットしてpushしてください（既存のPRに自動反映されます）
