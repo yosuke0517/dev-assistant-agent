@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
     extractErrorSummary,
+    extractLastPrUrl,
     FollowUpHandler,
     InteractiveHandler,
     ProgressTracker,
@@ -1077,17 +1078,12 @@ describe('extractErrorSummary', () => {
     });
 });
 
-describe('PR URL detection regex', () => {
-    // server.tsの /do エンドポイント内で使用されるPR URL検出パターン
-    const prUrlRegex =
-        /https:\/\/(?:github\.com\/[^\s"]+\/pull\/\d+|[^\s"]+\.backlog\.(?:jp|com)\/[^\s"]+\/pullRequests\/\d+)/;
-
+describe('extractLastPrUrl', () => {
     it('GitHub PR URLを検出できる', () => {
         const output =
             'PRが作成されました https://github.com/yosuke0517/dev-assistant-agent/pull/35 完了';
-        const match = output.match(prUrlRegex);
-        expect(match).not.toBeNull();
-        expect(match?.[0]).toBe(
+        const result = extractLastPrUrl(output);
+        expect(result).toBe(
             'https://github.com/yosuke0517/dev-assistant-agent/pull/35',
         );
     });
@@ -1095,9 +1091,8 @@ describe('PR URL detection regex', () => {
     it('Backlog PR URL (.backlog.jp) を検出できる', () => {
         const output =
             'PRを作成しました https://myspace.backlog.jp/git/PROJ/repo/pullRequests/42 end';
-        const match = output.match(prUrlRegex);
-        expect(match).not.toBeNull();
-        expect(match?.[0]).toBe(
+        const result = extractLastPrUrl(output);
+        expect(result).toBe(
             'https://myspace.backlog.jp/git/PROJ/repo/pullRequests/42',
         );
     });
@@ -1105,17 +1100,39 @@ describe('PR URL detection regex', () => {
     it('Backlog PR URL (.backlog.com) を検出できる', () => {
         const output =
             'PR: https://myspace.backlog.com/git/PROJ/repo/pullRequests/123';
-        const match = output.match(prUrlRegex);
-        expect(match).not.toBeNull();
-        expect(match?.[0]).toBe(
+        const result = extractLastPrUrl(output);
+        expect(result).toBe(
             'https://myspace.backlog.com/git/PROJ/repo/pullRequests/123',
         );
     });
 
     it('PR URLが含まれない場合はnullを返す', () => {
         const output = 'タスクが完了しました。レポートを送信します。';
-        const match = output.match(prUrlRegex);
-        expect(match).toBeNull();
+        const result = extractLastPrUrl(output);
+        expect(result).toBeNull();
+    });
+
+    it('複数のPR URLがある場合は最後のURLを返す', () => {
+        const output = [
+            '前回のPR: https://github.com/yosuke0517/dev-assistant-agent/pull/35',
+            'git logを確認...',
+            '新しいPRを作成しました: https://github.com/yosuke0517/dev-assistant-agent/pull/36',
+        ].join('\n');
+        const result = extractLastPrUrl(output);
+        expect(result).toBe(
+            'https://github.com/yosuke0517/dev-assistant-agent/pull/36',
+        );
+    });
+
+    it('GitHub PRとBacklog PRが混在する場合は最後のURLを返す', () => {
+        const output = [
+            '参考: https://github.com/yosuke0517/dev-assistant-agent/pull/10',
+            'PRを作成: https://myspace.backlog.jp/git/PROJ/repo/pullRequests/99',
+        ].join('\n');
+        const result = extractLastPrUrl(output);
+        expect(result).toBe(
+            'https://myspace.backlog.jp/git/PROJ/repo/pullRequests/99',
+        );
     });
 });
 
