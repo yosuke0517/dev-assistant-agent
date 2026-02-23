@@ -24,15 +24,48 @@ interface ParsedInput {
     folder: string;
     issueId: string | undefined;
     baseBranch: string | undefined;
+    userRequest: string | undefined;
 }
 
 /**
- * 入力テキストをフォルダ名・課題ID・ベースブランチに分割
+ * 入力テキストをフォルダ名・課題ID・ベースブランチ・ユーザー要望に分割
  * 例: "circus_backend RA_DEV-81 develop" -> { folder, issueId, baseBranch }
+ * 例: "circus_backend RA_DEV-85 feat/RA_DEV-85 CIでテスト時にエラーが出てるので修正してほしい"
+ *   -> { folder, issueId, baseBranch, userRequest }
  */
 export function parseInput(rawText: string): ParsedInput {
-    const parts = rawText.split(/[,、 ]+/);
-    return { folder: parts[0], issueId: parts[1], baseBranch: parts[2] };
+    const trimmed = rawText.trim();
+    if (!trimmed) {
+        return {
+            folder: '',
+            issueId: undefined,
+            baseBranch: undefined,
+            userRequest: undefined,
+        };
+    }
+
+    const delimiterPattern = /[,、 ]+/;
+    const parts: string[] = [];
+    let remaining = trimmed;
+
+    for (let i = 0; i < 3 && remaining; i++) {
+        const match = remaining.match(delimiterPattern);
+        if (match && match.index !== undefined) {
+            parts.push(remaining.substring(0, match.index));
+            remaining = remaining.substring(match.index + match[0].length);
+        } else {
+            parts.push(remaining);
+            remaining = '';
+            break;
+        }
+    }
+
+    return {
+        folder: parts[0],
+        issueId: parts[1],
+        baseBranch: parts[2],
+        userRequest: remaining || undefined,
+    };
 }
 
 function timestamp(): string {
@@ -447,6 +480,7 @@ export function spawnWorker(
     extraPrompt: string | null = null,
     baseBranch: string | null = null,
     followUpMessage: string | null = null,
+    userRequest: string | null = null,
 ): Promise<SpawnWorkerResult> {
     return new Promise((resolve) => {
         // Claude Code内から起動された場合のネスト検出を回避
@@ -479,6 +513,9 @@ export function spawnWorker(
                 SLACK_THREAD_TS: tracker?.threadTs || '',
                 ...(followUpMessage && {
                     FOLLOW_UP_MESSAGE: followUpMessage,
+                }),
+                ...(userRequest && {
+                    USER_REQUEST: userRequest,
                 }),
             },
         });
@@ -584,7 +621,9 @@ export function extractErrorSummary(output: string): string {
 }
 
 app.post('/do', async (req: Request, res: Response) => {
-    const { folder, issueId, baseBranch } = parseInput(req.body.text || '');
+    const { folder, issueId, baseBranch, userRequest } = parseInput(
+        req.body.text || '',
+    );
     const channelId = req.body.channel_id;
 
     if (!folder || !issueId) {
@@ -643,6 +682,8 @@ app.post('/do', async (req: Request, res: Response) => {
             tracker,
             extraPrompt,
             baseBranch || null,
+            null,
+            userRequest || null,
         );
         lastExitCode = exitCode;
         lastOutput = output;
