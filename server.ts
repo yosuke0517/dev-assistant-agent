@@ -836,7 +836,7 @@ app.post('/do', async (req: Request, res: Response) => {
     }
 });
 
-const PORT = 3000;
+const PORT = 8787;
 app.listen(PORT, () => {
     console.log('----------------------------------------------------');
     console.log(`Finegate Agent Server running on port ${PORT}`);
