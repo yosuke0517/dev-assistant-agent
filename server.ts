@@ -5,13 +5,14 @@ import {
     type FetchFn,
     formatMention,
     postToSlack,
+    type RetryOptions,
     type SlackReply,
     type WaitForSlackReplyOptions,
     waitForSlackReply,
 } from './lib/slack.js';
 
 export { formatMention, postToSlack, waitForSlackReply };
-export type { FetchFn, SlackReply, WaitForSlackReplyOptions };
+export type { FetchFn, RetryOptions, SlackReply, WaitForSlackReplyOptions };
 
 type PostFn = typeof postToSlack;
 

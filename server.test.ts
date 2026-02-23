@@ -496,12 +496,100 @@ describe('postToSlack', () => {
 
         const mockFetch = vi.fn().mockRejectedValue(new Error('Network error'));
 
-        const result = await postToSlack('C123456', 'テスト', null, mockFetch);
+        const result = await postToSlack('C123456', 'テスト', null, mockFetch, {
+            maxRetries: 0,
+        });
 
         expect(result).toBeNull();
         expect(consoleSpy).toHaveBeenCalledWith(
             'Slack 送信エラー:',
             'Network error',
+        );
+
+        consoleSpy.mockRestore();
+        process.env.SLACK_BOT_TOKEN = originalToken;
+    });
+
+    it('ネットワークエラー時にリトライして成功する', async () => {
+        const originalToken = process.env.SLACK_BOT_TOKEN;
+        process.env.SLACK_BOT_TOKEN = 'xoxb-test-token';
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+        let callCount = 0;
+        const mockFetch = vi.fn().mockImplementation(() => {
+            callCount++;
+            if (callCount <= 2) {
+                return Promise.reject(new Error('fetch failed'));
+            }
+            return Promise.resolve({
+                json: () => Promise.resolve({ ok: true, ts: '1234.5678' }),
+            });
+        });
+
+        const result = await postToSlack('C123456', 'テスト', null, mockFetch, {
+            maxRetries: 3,
+            sleepFn: async () => {},
+        });
+
+        expect(result).toBe('1234.5678');
+        expect(mockFetch).toHaveBeenCalledTimes(3);
+        expect(warnSpy).toHaveBeenCalledTimes(2);
+
+        warnSpy.mockRestore();
+        process.env.SLACK_BOT_TOKEN = originalToken;
+    });
+
+    it('リトライ上限に達した場合はnullを返す', async () => {
+        const originalToken = process.env.SLACK_BOT_TOKEN;
+        process.env.SLACK_BOT_TOKEN = 'xoxb-test-token';
+        const consoleSpy = vi
+            .spyOn(console, 'error')
+            .mockImplementation(() => {});
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+        const mockFetch = vi.fn().mockRejectedValue(new Error('Network error'));
+
+        const result = await postToSlack('C123456', 'テスト', null, mockFetch, {
+            maxRetries: 2,
+            sleepFn: async () => {},
+        });
+
+        expect(result).toBeNull();
+        expect(mockFetch).toHaveBeenCalledTimes(3); // 1回目 + 2回リトライ
+        expect(warnSpy).toHaveBeenCalledTimes(2);
+        expect(consoleSpy).toHaveBeenCalledWith(
+            'Slack 送信エラー:',
+            'Network error',
+        );
+
+        consoleSpy.mockRestore();
+        warnSpy.mockRestore();
+        process.env.SLACK_BOT_TOKEN = originalToken;
+    });
+
+    it('Slack APIエラーはリトライしない', async () => {
+        const originalToken = process.env.SLACK_BOT_TOKEN;
+        process.env.SLACK_BOT_TOKEN = 'xoxb-test-token';
+        const consoleSpy = vi
+            .spyOn(console, 'error')
+            .mockImplementation(() => {});
+
+        const mockFetch = vi.fn().mockResolvedValue({
+            json: vi
+                .fn()
+                .mockResolvedValue({ ok: false, error: 'channel_not_found' }),
+        });
+
+        const result = await postToSlack('C123456', 'テスト', null, mockFetch, {
+            maxRetries: 3,
+            sleepFn: async () => {},
+        });
+
+        expect(result).toBeNull();
+        expect(mockFetch).toHaveBeenCalledTimes(1); // リトライなし
+        expect(consoleSpy).toHaveBeenCalledWith(
+            'Slack API エラー:',
+            'channel_not_found',
         );
 
         consoleSpy.mockRestore();
