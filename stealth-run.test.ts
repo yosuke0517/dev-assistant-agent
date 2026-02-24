@@ -654,8 +654,9 @@ fs.writeFileSync(output, JSON.stringify({ mcpServers }, null, 2));
         const parseScript = `
             RELATED_REPOS="circus_backend:develop,circus_frontend:main"
             RESULTS=""
-            IFS=',' read -ra REPO_SPECS <<< "$RELATED_REPOS"
-            for repo_spec in "\${REPO_SPECS[@]}"; do
+            OLD_IFS="$IFS"
+            IFS=','
+            for repo_spec in $RELATED_REPOS; do
                 REL_REPO_NAME="\${repo_spec%%:*}"
                 REL_REPO_BRANCH="\${repo_spec#*:}"
                 if [ "$REL_REPO_BRANCH" = "$REL_REPO_NAME" ]; then
@@ -663,6 +664,7 @@ fs.writeFileSync(output, JSON.stringify({ mcpServers }, null, 2));
                 fi
                 RESULTS="\${RESULTS}\${REL_REPO_NAME}|\${REL_REPO_BRANCH};"
             done
+            IFS="$OLD_IFS"
             echo "$RESULTS"
         `;
         const result = execSync(parseScript, { encoding: 'utf8' });
@@ -674,8 +676,9 @@ fs.writeFileSync(output, JSON.stringify({ mcpServers }, null, 2));
     it('RELATED_REPOS でブランチ省略時に空文字になる', () => {
         const parseScript = `
             RELATED_REPOS="circus_backend"
-            IFS=',' read -ra REPO_SPECS <<< "$RELATED_REPOS"
-            for repo_spec in "\${REPO_SPECS[@]}"; do
+            OLD_IFS="$IFS"
+            IFS=','
+            for repo_spec in $RELATED_REPOS; do
                 REL_REPO_NAME="\${repo_spec%%:*}"
                 REL_REPO_BRANCH="\${repo_spec#*:}"
                 if [ "$REL_REPO_BRANCH" = "$REL_REPO_NAME" ]; then
@@ -683,6 +686,7 @@ fs.writeFileSync(output, JSON.stringify({ mcpServers }, null, 2));
                 fi
                 echo "name:$REL_REPO_NAME branch:$REL_REPO_BRANCH"
             done
+            IFS="$OLD_IFS"
         `;
         const result = execSync(parseScript, { encoding: 'utf8' });
         expect(result.trim()).toBe('name:circus_backend branch:');
