@@ -110,7 +110,7 @@ export async function waitForSlackReply(
 ): Promise<SlackReply | null> {
     const {
         intervalMs = 5_000,
-        timeoutMs = 1_800_000,
+        timeoutMs = 10_800_000,
         fetchFn = fetch as unknown as FetchFn,
     } = options;
     const token = process.env.SLACK_BOT_TOKEN;

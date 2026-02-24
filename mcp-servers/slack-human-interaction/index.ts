@@ -12,7 +12,7 @@ import {
     waitForSlackReply,
 } from '../../lib/slack.js';
 
-const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000; // 30分
+const DEFAULT_TIMEOUT_MS = 3 * 60 * 60 * 1000; // 3時間
 
 type PostFn = typeof postToSlack;
 type WaitReplyFn = typeof waitForSlackReply;
