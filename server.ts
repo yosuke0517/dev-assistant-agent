@@ -337,7 +337,7 @@ export class InteractiveHandler {
         this.originalCommand = options.originalCommand;
         this._post = options.postFn || postToSlack;
         this._waitReply = options.waitReplyFn || waitForSlackReply;
-        this.timeoutMs = options.timeoutMs || 1_800_000;
+        this.timeoutMs = options.timeoutMs || 10_800_000;
     }
 
     /**
@@ -432,7 +432,7 @@ export class FollowUpHandler {
         this.threadTs = threadTs;
         this._post = options.postFn || postToSlack;
         this._waitReply = options.waitReplyFn || waitForSlackReply;
-        this.timeoutMs = options.timeoutMs || 1_800_000;
+        this.timeoutMs = options.timeoutMs || 10_800_000;
     }
 
     /**
