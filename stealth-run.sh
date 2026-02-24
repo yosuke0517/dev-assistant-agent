@@ -163,10 +163,83 @@ fi
 echo "Creating worktree at: $WORKTREE_PATH"
 git -C "$TARGET_PATH" worktree add --detach "$WORKTREE_PATH" "$WORKTREE_START"
 
+# 4.5. 関連リポジトリの worktree を作成
+RELATED_WORKTREES_FILE="/tmp/finegate-related-worktrees-$$.txt"
+CROSS_REPO_PROMPT=""
+RELATED_MCP_PATHS=""
+
+if [ -n "${RELATED_REPOS:-}" ]; then
+    echo "Processing related repositories: $RELATED_REPOS"
+    IFS=',' read -ra REPO_SPECS <<< "$RELATED_REPOS"
+    for repo_spec in "${REPO_SPECS[@]}"; do
+        REL_REPO_NAME="${repo_spec%%:*}"
+        REL_REPO_BRANCH="${repo_spec#*:}"
+        if [ "$REL_REPO_BRANCH" = "$REL_REPO_NAME" ]; then
+            REL_REPO_BRANCH=""
+        fi
+
+        # 関連リポジトリのパスを解決
+        if [ "$REL_REPO_NAME" = "agent" ]; then
+            REL_REPO_PATH="$AGENT_PROJECT_PATH"
+        else
+            REL_REPO_PATH="$WORKSPACE_ROOT/$REL_REPO_NAME"
+        fi
+
+        if [ ! -d "$REL_REPO_PATH" ]; then
+            echo "Warning: Related repo directory $REL_REPO_PATH does not exist. Skipping."
+            continue
+        fi
+
+        # ベースブランチ決定
+        REL_BASE_BRANCH="$REL_REPO_BRANCH"
+        if [ -z "$REL_BASE_BRANCH" ]; then
+            REL_BASE_BRANCH=$(git -C "$REL_REPO_PATH" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')
+            if [ -z "$REL_BASE_BRANCH" ]; then
+                if git -C "$REL_REPO_PATH" show-ref --verify --quiet refs/heads/main; then
+                    REL_BASE_BRANCH="main"
+                elif git -C "$REL_REPO_PATH" show-ref --verify --quiet refs/heads/develop; then
+                    REL_BASE_BRANCH="develop"
+                elif git -C "$REL_REPO_PATH" show-ref --verify --quiet refs/heads/master; then
+                    REL_BASE_BRANCH="master"
+                else
+                    echo "Warning: Could not detect base branch for $REL_REPO_NAME. Skipping."
+                    continue
+                fi
+            fi
+        fi
+
+        # 最新を取得
+        git -C "$REL_REPO_PATH" fetch origin "$REL_BASE_BRANCH" 2>/dev/null || true
+        git -C "$REL_REPO_PATH" worktree prune 2>/dev/null || true
+
+        # worktree 作成
+        REL_WORKTREE="/tmp/finegate-worktrees/${REL_REPO_NAME}-$(date +%s)"
+        echo "Creating related worktree at: $REL_WORKTREE (base: $REL_BASE_BRANCH)"
+        git -C "$REL_REPO_PATH" worktree add --detach "$REL_WORKTREE" "origin/$REL_BASE_BRANCH"
+
+        # git config 設定
+        git -C "$REL_WORKTREE" config user.name "$GIT_USER_NAME"
+        git -C "$REL_WORKTREE" config user.email "$GIT_USER_EMAIL"
+
+        # クリーンアップ用に記録
+        echo "${REL_REPO_PATH}|${REL_WORKTREE}" >> "$RELATED_WORKTREES_FILE"
+
+        # MCP設定マージ用のパスを記録
+        RELATED_MCP_PATHS="${RELATED_MCP_PATHS}${RELATED_MCP_PATHS:+,}${REL_REPO_PATH}"
+
+        # プロンプト用の情報を蓄積
+        CROSS_REPO_PROMPT="${CROSS_REPO_PROMPT}
+- リポジトリ: ${REL_REPO_NAME}
+  パス: ${REL_WORKTREE}
+  ベースブランチ: ${REL_BASE_BRANCH}"
+    done
+fi
+
 # 5. MCP設定ファイルを動的に生成（ask_human + グローバル・プロジェクトMCPをマージ）
 MCP_CONFIG="/tmp/finegate-mcp-config-$$.json"
 MCP_SCRIPT_DIR="$SCRIPT_DIR" \
 MCP_TARGET_PATH="$TARGET_PATH" \
+MCP_RELATED_PATHS="$RELATED_MCP_PATHS" \
 MCP_OUTPUT="$MCP_CONFIG" \
 node -e "
 const fs = require('fs');
@@ -174,6 +247,7 @@ const path = require('path');
 
 const scriptDir = process.env.MCP_SCRIPT_DIR;
 const targetPath = process.env.MCP_TARGET_PATH;
+const relatedPaths = process.env.MCP_RELATED_PATHS;
 const output = process.env.MCP_OUTPUT;
 
 let mcpServers = {};
@@ -187,6 +261,21 @@ try {
     }
 } catch (e) {
     console.error('Warning: global MCP config parse error:', e.message);
+}
+
+// 1.5. 関連リポジトリのMCP設定を読み込み（低〜中優先度）
+if (relatedPaths) {
+    for (const rp of relatedPaths.split(',')) {
+        const relMcpPath = path.join(rp, '.mcp.json');
+        try {
+            if (fs.existsSync(relMcpPath)) {
+                const r = JSON.parse(fs.readFileSync(relMcpPath, 'utf-8'));
+                if (r.mcpServers) Object.assign(mcpServers, r.mcpServers);
+            }
+        } catch (e) {
+            console.error('Warning: related MCP config parse error:', e.message);
+        }
+    }
 }
 
 // 2. プロジェクトレベルMCP設定 (\$TARGET_PATH/.mcp.json) を読み込み（中優先度）
@@ -253,6 +342,14 @@ cleanup() {
     rm -f "$MCP_CONFIG"
     echo "Cleaning up worktree: $WORKTREE_PATH"
     git -C "$TARGET_PATH" worktree remove --force "$WORKTREE_PATH" 2>/dev/null || rm -rf "$WORKTREE_PATH"
+    # 関連リポジトリの worktree もクリーンアップ
+    if [ -f "$RELATED_WORKTREES_FILE" ]; then
+        while IFS='|' read -r rel_target rel_wt; do
+            echo "Cleaning up related worktree: $rel_wt"
+            git -C "$rel_target" worktree remove --force "$rel_wt" 2>/dev/null || rm -rf "$rel_wt"
+        done < "$RELATED_WORKTREES_FILE"
+        rm -f "$RELATED_WORKTREES_FILE"
+    fi
 }
 trap cleanup EXIT
 
@@ -446,6 +543,24 @@ if [ -z "$FOLLOW_UP_MESSAGE" ] && [ -n "$EXTRA_PROMPT" ]; then
 
 【ユーザーからの追加指示】
 ${EXTRA_PROMPT}"
+fi
+
+# クロスリポジトリ対応の追加指示
+if [ -n "$CROSS_REPO_PROMPT" ]; then
+    PROMPT="${PROMPT}
+
+【クロスリポジトリ対応】
+以下の関連リポジトリにもアクセス可能です。必要に応じて変更を加えてください。
+${CROSS_REPO_PROMPT}
+
+各関連リポジトリでの作業手順:
+1. 関連リポジトリのディレクトリに移動してコードを確認・修正
+2. ブランチを作成（feat/${ISSUE_ID}）してチェックアウト
+3. 変更をコミットしてpush
+4. PRを作成（draft、各リポジトリのベースブランチをマージ先に指定）
+
+【重要】プライマリリポジトリと関連リポジトリの両方でPRを作成してください。
+【重要】関連リポジトリのベースブランチへ直接 push しないでください。"
 fi
 
 # worktree ブランチ競合時の追加指示
