@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
     extractErrorSummary,
     extractLastPrUrl,
+    extractRelatedRepos,
     FollowUpHandler,
     InteractiveHandler,
     ProgressTracker,
@@ -173,6 +174,81 @@ describe('parseInput', () => {
             baseBranch: 'feat/issue-46',
             userRequest: 'テストを追加してほしい',
         });
+    });
+});
+
+describe('extractRelatedRepos', () => {
+    it('--related repo:branch を正しく抽出する', () => {
+        const result = extractRelatedRepos(
+            'circus_agent_ecosystem RA_DEV-81 develop --related circus_backend:develop',
+        );
+        expect(result.relatedRepos).toEqual([
+            { name: 'circus_backend', branch: 'develop' },
+        ]);
+        expect(result.cleanedText).toBe(
+            'circus_agent_ecosystem RA_DEV-81 develop',
+        );
+    });
+
+    it('--related repo（ブランチ省略）を正しく抽出する', () => {
+        const result = extractRelatedRepos(
+            'circus_agent_ecosystem RA_DEV-81 develop --related circus_backend',
+        );
+        expect(result.relatedRepos).toEqual([{ name: 'circus_backend' }]);
+        expect(result.cleanedText).toBe(
+            'circus_agent_ecosystem RA_DEV-81 develop',
+        );
+    });
+
+    it('複数の --related を正しく抽出する', () => {
+        const result = extractRelatedRepos(
+            'circus_agent_ecosystem RA_DEV-81 develop --related circus_backend:develop --related circus_backend_v2:main',
+        );
+        expect(result.relatedRepos).toEqual([
+            { name: 'circus_backend', branch: 'develop' },
+            { name: 'circus_backend_v2', branch: 'main' },
+        ]);
+        expect(result.cleanedText).toBe(
+            'circus_agent_ecosystem RA_DEV-81 develop',
+        );
+    });
+
+    it('--related なしの場合は空配列を返す', () => {
+        const result = extractRelatedRepos(
+            'circus_agent_ecosystem RA_DEV-81 develop',
+        );
+        expect(result.relatedRepos).toEqual([]);
+        expect(result.cleanedText).toBe(
+            'circus_agent_ecosystem RA_DEV-81 develop',
+        );
+    });
+
+    it('userRequest と --related が混在するケースを正しく処理する', () => {
+        const result = extractRelatedRepos(
+            'circus_agent_ecosystem RA_DEV-81 develop --related circus_backend:develop テストを追加してほしい',
+        );
+        expect(result.relatedRepos).toEqual([
+            { name: 'circus_backend', branch: 'develop' },
+        ]);
+        expect(result.cleanedText).toBe(
+            'circus_agent_ecosystem RA_DEV-81 develop テストを追加してほしい',
+        );
+    });
+
+    it('空文字列の場合は空配列と空文字列を返す', () => {
+        const result = extractRelatedRepos('');
+        expect(result.relatedRepos).toEqual([]);
+        expect(result.cleanedText).toBe('');
+    });
+
+    it('抽出後に連続スペースがクリーンアップされる', () => {
+        const result = extractRelatedRepos(
+            'circus_agent_ecosystem  --related circus_backend:develop  RA_DEV-81',
+        );
+        expect(result.relatedRepos).toEqual([
+            { name: 'circus_backend', branch: 'develop' },
+        ]);
+        expect(result.cleanedText).toBe('circus_agent_ecosystem RA_DEV-81');
     });
 });
 

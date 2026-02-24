@@ -20,6 +20,44 @@ const app = express();
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
+export interface RelatedRepo {
+    name: string;
+    branch?: string;
+}
+
+interface ExtractRelatedResult {
+    cleanedText: string;
+    relatedRepos: RelatedRepo[];
+}
+
+/**
+ * 入力テキストから --related オプションを抽出する
+ * 例: "circus_agent_ecosystem RA_DEV-81 develop --related circus_backend:develop"
+ * → { cleanedText: "circus_agent_ecosystem RA_DEV-81 develop", relatedRepos: [{ name: "circus_backend", branch: "develop" }] }
+ */
+export function extractRelatedRepos(text: string): ExtractRelatedResult {
+    const relatedRepos: RelatedRepo[] = [];
+    const cleaned = text.replace(
+        /--related\s+(\S+)/g,
+        (_, repoSpec: string) => {
+            const colonIndex = repoSpec.indexOf(':');
+            if (colonIndex === -1) {
+                relatedRepos.push({ name: repoSpec });
+            } else {
+                relatedRepos.push({
+                    name: repoSpec.substring(0, colonIndex),
+                    branch: repoSpec.substring(colonIndex + 1),
+                });
+            }
+            return '';
+        },
+    );
+    return {
+        cleanedText: cleaned.replace(/\s{2,}/g, ' ').trim(),
+        relatedRepos,
+    };
+}
+
 interface ParsedInput {
     folder: string;
     issueId: string | undefined;
@@ -492,6 +530,7 @@ export function spawnWorker(
     baseBranch: string | null = null,
     followUpMessage: string | null = null,
     userRequest: string | null = null,
+    relatedRepos: RelatedRepo[] = [],
 ): Promise<SpawnWorkerResult> {
     return new Promise((resolve) => {
         // Claude Code内から起動された場合のネスト検出を回避
@@ -527,6 +566,13 @@ export function spawnWorker(
                 }),
                 ...(userRequest && {
                     USER_REQUEST: userRequest,
+                }),
+                ...(relatedRepos.length > 0 && {
+                    RELATED_REPOS: relatedRepos
+                        .map(
+                            (r) => `${r.name}${r.branch ? `:${r.branch}` : ''}`,
+                        )
+                        .join(','),
                 }),
             },
         });
@@ -632,9 +678,10 @@ export function extractErrorSummary(output: string): string {
 }
 
 app.post('/do', async (req: Request, res: Response) => {
-    const { folder, issueId, baseBranch, userRequest } = parseInput(
-        req.body.text || '',
-    );
+    const rawText = req.body.text || '';
+    const { cleanedText, relatedRepos } = extractRelatedRepos(rawText);
+    const { folder, issueId, baseBranch, userRequest } =
+        parseInput(cleanedText);
     const channelId = req.body.channel_id;
 
     if (!folder || !issueId) {
@@ -666,7 +713,6 @@ app.post('/do', async (req: Request, res: Response) => {
     tracker.start();
 
     // 4. インタラクティブハンドラー（エラー時にSlackで確認）
-    const rawText = req.body.text || '';
     const interactive = new InteractiveHandler(channelId, parentTs, {
         originalCommand: rawText.trim() || undefined,
     });
@@ -698,6 +744,7 @@ app.post('/do', async (req: Request, res: Response) => {
             baseBranch || null,
             null,
             userRequest || null,
+            relatedRepos,
         );
         lastExitCode = exitCode;
         lastOutput = output;
@@ -820,6 +867,8 @@ app.post('/do', async (req: Request, res: Response) => {
                 null,
                 baseBranch || null,
                 decision.message,
+                null,
+                relatedRepos,
             );
 
             tracker.stop();

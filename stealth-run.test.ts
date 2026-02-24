@@ -611,6 +611,180 @@ fs.writeFileSync(output, JSON.stringify({ mcpServers }, null, 2));
         }
     });
 
+    it('RELATED_REPOS の処理ロジックが含まれる', async () => {
+        const fs = await import('node:fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        expect(content).toContain('RELATED_REPOS');
+        expect(content).toContain('RELATED_WORKTREES_FILE');
+        expect(content).toContain('CROSS_REPO_PROMPT');
+    });
+
+    it('関連リポジトリの worktree 作成ロジックが含まれる', async () => {
+        const fs = await import('node:fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        expect(content).toContain('Processing related repositories');
+        expect(content).toContain('Creating related worktree at');
+    });
+
+    it('関連リポジトリの worktree がクリーンアップ対象に含まれる', async () => {
+        const fs = await import('node:fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        expect(content).toContain('Cleaning up related worktree');
+        expect(content).toContain('RELATED_WORKTREES_FILE');
+    });
+
+    it('クロスリポジトリのプロンプトが生成される', async () => {
+        const fs = await import('node:fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        expect(content).toContain('クロスリポジトリ対応');
+        expect(content).toContain('関連リポジトリにもアクセス可能');
+        expect(content).toContain(
+            'プライマリリポジトリと関連リポジトリの両方でPRを作成',
+        );
+    });
+
+    it('MCP設定に関連リポジトリのMCPがマージされる', async () => {
+        const fs = await import('node:fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        expect(content).toContain('MCP_RELATED_PATHS');
+        expect(content).toContain('関連リポジトリのMCP設定を読み込み');
+    });
+
+    it('RELATED_REPOS のパースロジックが正しく動作する', () => {
+        const parseScript = `
+            RELATED_REPOS="circus_backend:develop,circus_frontend:main"
+            RESULTS=""
+            OLD_IFS="$IFS"
+            IFS=','
+            for repo_spec in $RELATED_REPOS; do
+                REL_REPO_NAME="\${repo_spec%%:*}"
+                REL_REPO_BRANCH="\${repo_spec#*:}"
+                if [ "$REL_REPO_BRANCH" = "$REL_REPO_NAME" ]; then
+                    REL_REPO_BRANCH=""
+                fi
+                RESULTS="\${RESULTS}\${REL_REPO_NAME}|\${REL_REPO_BRANCH};"
+            done
+            IFS="$OLD_IFS"
+            echo "$RESULTS"
+        `;
+        const result = execSync(parseScript, { encoding: 'utf8' });
+        expect(result.trim()).toBe(
+            'circus_backend|develop;circus_frontend|main;',
+        );
+    });
+
+    it('RELATED_REPOS でブランチ省略時に空文字になる', () => {
+        const parseScript = `
+            RELATED_REPOS="circus_backend"
+            OLD_IFS="$IFS"
+            IFS=','
+            for repo_spec in $RELATED_REPOS; do
+                REL_REPO_NAME="\${repo_spec%%:*}"
+                REL_REPO_BRANCH="\${repo_spec#*:}"
+                if [ "$REL_REPO_BRANCH" = "$REL_REPO_NAME" ]; then
+                    REL_REPO_BRANCH=""
+                fi
+                echo "name:$REL_REPO_NAME branch:$REL_REPO_BRANCH"
+            done
+            IFS="$OLD_IFS"
+        `;
+        const result = execSync(parseScript, { encoding: 'utf8' });
+        expect(result.trim()).toBe('name:circus_backend branch:');
+    });
+
+    it('MCP設定マージで関連リポジトリのMCPが取り込まれる', () => {
+        const fs = require('node:fs');
+        const tmpDir = `/tmp/finegate-mcp-test-${Date.now()}`;
+        const outputPath = `${tmpDir}/mcp-config.json`;
+        const relatedDir = `${tmpDir}/related-project`;
+        fs.mkdirSync(relatedDir, { recursive: true });
+
+        // 関連リポジトリのMCP設定
+        fs.writeFileSync(
+            `${relatedDir}/.mcp.json`,
+            JSON.stringify({
+                mcpServers: {
+                    figma: {
+                        command: 'npx',
+                        args: ['figma-mcp'],
+                        env: { FIGMA_TOKEN: 'related-token' },
+                    },
+                },
+            }),
+        );
+
+        try {
+            const mergeScript = `
+                MCP_SCRIPT_DIR="/dummy/script/dir" \
+                MCP_TARGET_PATH="/tmp/nonexistent-project" \
+                MCP_RELATED_PATHS="${relatedDir}" \
+                MCP_OUTPUT="${outputPath}" \
+                HOME="${tmpDir}" \
+                SLACK_BOT_TOKEN="test-token" \
+                SLACK_CHANNEL="C123" \
+                SLACK_THREAD_TS="1234.5678" \
+                OWNER_SLACK_MEMBER_ID="U999" \
+                node -e "
+const fs = require('fs');
+const path = require('path');
+const scriptDir = process.env.MCP_SCRIPT_DIR;
+const targetPath = process.env.MCP_TARGET_PATH;
+const relatedPaths = process.env.MCP_RELATED_PATHS;
+const output = process.env.MCP_OUTPUT;
+let mcpServers = {};
+const globalPath = path.join(process.env.HOME || '', '.claude', '.mcp.json');
+try {
+    if (fs.existsSync(globalPath)) {
+        const g = JSON.parse(fs.readFileSync(globalPath, 'utf-8'));
+        if (g.mcpServers) Object.assign(mcpServers, g.mcpServers);
+    }
+} catch (e) { console.error('Warning:', e.message); }
+if (relatedPaths) {
+    for (const rp of relatedPaths.split(',')) {
+        const relMcpPath = path.join(rp, '.mcp.json');
+        try {
+            if (fs.existsSync(relMcpPath)) {
+                const r = JSON.parse(fs.readFileSync(relMcpPath, 'utf-8'));
+                if (r.mcpServers) Object.assign(mcpServers, r.mcpServers);
+            }
+        } catch (e) { console.error('Warning:', e.message); }
+    }
+}
+const projectPath = path.join(targetPath, '.mcp.json');
+try {
+    if (fs.existsSync(projectPath)) {
+        const p = JSON.parse(fs.readFileSync(projectPath, 'utf-8'));
+        if (p.mcpServers) Object.assign(mcpServers, p.mcpServers);
+    }
+} catch (e) { console.error('Warning:', e.message); }
+mcpServers['slack-human'] = {
+    command: 'node',
+    args: [path.join(scriptDir, 'dist/mcp-servers/slack-human-interaction/index.js')],
+    env: {
+        SLACK_BOT_TOKEN: process.env.SLACK_BOT_TOKEN || '',
+        SLACK_CHANNEL: process.env.SLACK_CHANNEL || '',
+        SLACK_THREAD_TS: process.env.SLACK_THREAD_TS || '',
+        OWNER_SLACK_MEMBER_ID: process.env.OWNER_SLACK_MEMBER_ID || ''
+    }
+};
+fs.writeFileSync(output, JSON.stringify({ mcpServers }, null, 2));
+"
+            `;
+            execSync(mergeScript, { encoding: 'utf8', stdio: 'pipe' });
+            const config = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
+
+            // 関連リポジトリのMCPが含まれている
+            expect(config.mcpServers.figma).toBeDefined();
+            expect(config.mcpServers.figma.env.FIGMA_TOKEN).toBe(
+                'related-token',
+            );
+            // slack-humanも含まれている
+            expect(config.mcpServers['slack-human']).toBeDefined();
+        } finally {
+            fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+    });
+
     it('ディレクトリが存在する場合、最初のチェックは通過する（git操作前まで）', () => {
         // 実際に存在するディレクトリ（カレントディレクトリ）を使用
         const _existingFolder = '.';
