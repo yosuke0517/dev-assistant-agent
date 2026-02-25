@@ -507,7 +507,147 @@ AWS (Linux x86_64) では `darwin-arm64` ではなく `linux-x64` のプレビ�
 `stealth-run.sh` で使用されている `--dangerously-skip-permissions` フラグはローカル環境と同様に動作する。
 EC2 上でも agent ユーザーの権限内で実行されるため、セキュリティリスクは限定的。
 
-## 9. 将来の拡張性
+## 9. 自宅 Mac Mini 運用 vs AWS 比較
+
+AWS 月額 ~$67-71（約1万円）に対し、Mac Mini を購入して自宅サーバーとして運用する選択肢を比較する。
+
+### 9.1. コスト比較
+
+#### 初期費用
+
+| 項目 | AWS | 自宅 Mac Mini |
+|------|-----|---------------|
+| Mac Mini 本体（M2, 16GB/256GB） | 不要 | ~¥84,800 |
+| Mac Mini 本体（M2 Pro, 16GB/512GB） | 不要 | ~¥158,800 |
+| UPS（無停電電源装置） | 不要 | ~¥10,000-20,000（推奨） |
+| Ethernet ケーブル等 | 不要 | ~¥1,000 |
+| **合計** | **¥0** | **~¥96,000-180,000** |
+
+#### ランニングコスト（月額）
+
+| 項目 | AWS | 自宅 Mac Mini |
+|------|-----|---------------|
+| EC2 (t3.medium) | ~¥4,500 ($30) | ¥0 |
+| EBS (50GB gp3) | ~¥600 ($4) | ¥0 |
+| NAT Gateway | ~¥4,800 ($32) | ¥0 |
+| CloudWatch Logs | ~¥150-750 ($1-5) | ¥0 |
+| 電気代（Mac Mini 24/7 稼働、~15W 平均） | ¥0 | ~¥350-500 |
+| インターネット回線 | 不要（別途） | 既存回線を利用（追加費用なし） |
+| Cloudflare Tunnel | 無料 | 無料（同じ仕組み） |
+| **月額合計** | **~¥10,000** | **~¥350-500** |
+
+#### 損益分岐点
+
+| シナリオ | Mac Mini 回収期間 |
+|---------|-------------------|
+| M2 (¥84,800) + UPS (¥15,000) | ~10-11ヶ月 |
+| M2 Pro (¥158,800) + UPS (¥15,000) | ~18-19ヶ月 |
+| M2 (¥84,800) UPS なし | ~9ヶ月 |
+
+> **結論: M2 モデルなら約10ヶ月で元が取れる。2年以上運用するなら自宅 Mac Mini の方が大幅に安い。**
+
+### 9.2. 性能比較
+
+| 項目 | AWS EC2 (t3.medium) | Mac Mini (M2, 16GB) |
+|------|---------------------|---------------------|
+| CPU | 2 vCPU（バースト制限あり） | 8コア（4性能 + 4効率、制限なし） |
+| メモリ | 4GB | 16GB |
+| ストレージ | 50GB EBS gp3 | 256GB NVMe SSD |
+| ネットワーク | 最大5Gbps（バースト） | 自宅回線依存（一般的に 1Gbps） |
+| GPU | なし | 10コア GPU（将来のローカルLLM実行に有利） |
+
+> **性能面では Mac Mini が圧倒的に優位。** 特に CPU のバースト制限がないため、Claude Code CLI の長時間実行でも安定する。t3.medium では CPU クレジット枯渇のリスクがあるが、Mac Mini にはその心配がない。
+
+### 9.3. 運用面の比較
+
+| 項目 | AWS | 自宅 Mac Mini | 備考 |
+|------|-----|---------------|------|
+| **可用性** | ◎ 高（SLA 99.99%） | △ 自宅回線・電源に依存 | 停電、回線障害時はダウン |
+| **リモートアクセス** | ◎ SSM Session Manager | ○ Cloudflare Tunnel + SSH | Mac Mini にも Cloudflare Tunnel で SSH 可能 |
+| **バックアップ** | ◎ EBS スナップショット | ○ Time Machine / 手動 | AWS は自動化が容易 |
+| **スケーラビリティ** | ◎ インスタンス変更容易 | × 物理ハード依存 | AWS は需要に応じてスケール可能 |
+| **メンテナンス** | ◎ OS パッチ自動化可 | ○ macOS 自動アップデート | どちらも自動化可能 |
+| **セキュリティ** | ◎ VPC + SG + IAM | ○ Cloudflare Tunnel で保護 | AWS の方がネットワーク分離が強固 |
+| **災害復旧** | ◎ 別リージョン復旧可 | × 物理機材の再調達が必要 | AWS は Terraform で再構築容易 |
+| **ノイズ・発熱** | 関係なし | ○ Mac Mini はほぼ無音 | 自宅でも気にならない |
+| **電源障害対策** | ◎ AWS 側で冗長化済み | △ UPS で短時間カバー可 | 長時間停電には対応困難 |
+
+### 9.4. 自宅 Mac Mini の構成（採用する場合）
+
+現状のローカル MacBook Pro 構成とほぼ同じ。変更点は最小限。
+
+```
+[Slack /do] → [Cloudflare Tunnel] → [Mac Mini:8787] → [Claude Code CLI] → [GitHub/Backlog]
+```
+
+#### セットアップ手順
+
+1. Mac Mini を自宅ネットワークに接続
+2. macOS 初期設定、自動ログイン設定
+3. Homebrew、Node.js、Git、Claude Code CLI をインストール
+4. `cloudflared` インストール・Tunnel 設定（既存設定を移行）
+5. SSH リモートアクセス設定（Cloudflare Tunnel 経由）
+6. アプリケーションを `launchd` でサービス登録（自動起動）
+7. 省エネ設定: 「電源アダプタ接続時はスリープしない」を有効化
+
+#### macOS のサービス登録（launchd）
+
+```xml
+<!-- ~/Library/LaunchAgents/com.finegate.agent.plist -->
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.finegate.agent</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/node</string>
+        <string>/Users/agent/work/dev-assistant-agent/dist/server.js</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/agent/work/dev-assistant-agent</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>NODE_ENV</key>
+        <string>production</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/agent/logs/finegate-agent.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/agent/logs/finegate-agent.error.log</string>
+</dict>
+</plist>
+```
+
+### 9.5. 推奨判定
+
+| 条件 | 推奨環境 |
+|------|---------|
+| コスト最優先（個人プロジェクト） | **自宅 Mac Mini** |
+| 2年以上の長期運用が確定 | **自宅 Mac Mini** |
+| 高可用性が必要（ビジネスクリティカル） | **AWS** |
+| 災害復旧・冗長性が重要 | **AWS** |
+| 将来的にスケールアウトが必要 | **AWS** |
+| 現状の用途（個人開発アシスタント）を継続 | **自宅 Mac Mini** |
+
+### 9.6. 総合評価
+
+**現在の用途（個人開発アシスタント）であれば、自宅 Mac Mini が最もコストパフォーマンスが高い。**
+
+- AWS 月額 ~¥10,000 × 24ヶ月 = **¥240,000**
+- Mac Mini (M2) ~¥85,000 + 電気代 ¥500 × 24ヶ月 = **~¥97,000**
+- **2年間で約14万円の差額が生まれる**
+
+ただし、本プロジェクトが将来的にチーム利用やビジネスクリティカルな用途に拡大する場合は、AWS のスケーラビリティと可用性が重要になる。**AWS デプロイメント計画はそのまま維持し、将来の移行オプションとして残しておく**ことを推奨する。
+
+> **ハイブリッド戦略**: 普段は自宅 Mac Mini で運用し、AWS の Terraform 構成はいつでもデプロイ可能な状態で保持。Mac Mini の故障や長期不在時に AWS へフェイルオーバーできる体制を構築するのが理想的。
+
+## 10. 将来の拡張性（AWS 移行時）
 
 | 拡張案 | 概要 | 実装難度 |
 |--------|------|---------|
@@ -518,7 +658,7 @@ EC2 上でも agent ユーザーの権限内で実行されるため、セキュ
 | CloudWatch アラーム | サービス異常時の自動通知（Slack 連携） | 低 |
 | 夜間自動停止/起動 | EventBridge + Lambda で EC2 をスケジュール制御 | 低 |
 
-## 10. Terraform 実装時の参考: variables.tf
+## 11. Terraform 実装時の参考: variables.tf
 
 ```hcl
 variable "aws_region" {
