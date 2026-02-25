@@ -566,7 +566,7 @@ AWS 月額 ~$67-71（約1万円）に対し、Mac Mini を購入して自宅サ�
 | 項目 | AWS | 自宅 Mac Mini | 備考 |
 |------|-----|---------------|------|
 | **可用性** | ◎ 高（SLA 99.99%） | △ 自宅回線・電源に依存 | 停電、回線障害時はダウン |
-| **リモートアクセス** | ◎ SSM Session Manager | ○ Cloudflare Tunnel + SSH | Mac Mini にも Cloudflare Tunnel で SSH 可能 |
+| **リモートアクセス** | ◎ SSM Session Manager | ○ Cloudflare Tunnel + SSH | Mac Mini にも Cloudflare Tunnel で SSH 可能（詳細は 9.7 参照） |
 | **バックアップ** | ◎ EBS スナップショット | ○ Time Machine / 手動 | AWS は自動化が容易 |
 | **スケーラビリティ** | ◎ インスタンス変更容易 | × 物理ハード依存 | AWS は需要に応じてスケール可能 |
 | **メンテナンス** | ◎ OS パッチ自動化可 | ○ macOS 自動アップデート | どちらも自動化可能 |
@@ -638,7 +638,157 @@ AWS 月額 ~$67-71（約1万円）に対し、Mac Mini を購入して自宅サ�
 | 将来的にスケールアウトが必要 | **AWS** |
 | 現状の用途（個人開発アシスタント）を継続 | **自宅 Mac Mini** |
 
-### 9.6. 総合評価
+### 9.7. 外出先からのリモート復旧
+
+自宅 Mac Mini 運用における最大の懸念は「外出先で障害が発生した場合に復旧できるか」である。
+以下にシナリオ別の対応策と、事前に準備すべき設定をまとめる。
+
+#### 障害シナリオ別の対応
+
+| シナリオ | 外出先から復旧可能? | 対応方法 |
+|---------|-------------------|---------|
+| **Agent プロセスがクラッシュ** | ◎ 自動復旧 | `launchd` の `KeepAlive` 設定で自動再起動される |
+| **cloudflared がクラッシュ** | ◎ 自動復旧 | `launchd` の `KeepAlive` 設定で自動再起動される |
+| **Node.js がハングアップ** | ○ SSH で対応可 | Cloudflare Tunnel 経由で SSH → `launchctl stop` で再起動 |
+| **macOS がフリーズ** | ○ スマートプラグで対応 | スマートプラグでリモート電源OFF/ON → macOS 自動起動設定で復旧 |
+| **カーネルパニック** | ○ 自動復旧 | macOS は KP 後に自動再起動する（デフォルト動作） |
+| **停電（短時間）** | ○ UPS で継続 | UPS で数分〜数十分はカバー、復電後に継続稼働 |
+| **停電（長時間）** | ○ 自動復旧 | 復電後に macOS 自動起動 + launchd でサービス自動復旧 |
+| **自宅インターネット障害** | × 復旧不可 | 回線復旧を待つしかない（モバイル回線フェイルオーバーで軽減可） |
+| **ハードウェア故障** | × 復旧不可 | 物理的な対応が必要。AWS フェイルオーバーが有効 |
+
+#### 事前準備: macOS 設定
+
+以下の設定を事前に行うことで、大半の障害からの自動復旧が可能になる。
+
+```bash
+# 1. 電源復旧後に自動起動（停電対策の最重要設定）
+sudo pmset -a autorestart 1
+
+# 2. システムフリーズ時の自動再起動
+sudo systemsetup -setrestartfreeze on
+
+# 3. スリープ無効化（サーバー用途）
+sudo pmset -a sleep 0
+sudo pmset -a disksleep 0
+sudo pmset -a displaysleep 0
+
+# 4. Wake on LAN を有効化（同一ネットワーク内からの起動用）
+sudo pmset -a wolon 1
+
+# 5. Power Nap を有効化（スリープ中もネットワーク接続を維持）
+sudo pmset -a powernap 1
+```
+
+#### 事前準備: リモート SSH アクセス（Cloudflare Tunnel 経由）
+
+Mac Mini にも Cloudflare Tunnel 経由で SSH アクセスを設定しておく。
+
+```yaml
+# ~/.cloudflared/config.yml（Mac Mini 側）
+tunnel: <tunnel-id>
+credentials-file: /Users/<username>/.cloudflared/<tunnel-id>.json
+
+ingress:
+  - hostname: agent.finegate.xyz
+    service: http://localhost:8787
+  - hostname: ssh.finegate.xyz        # SSH 用のサブドメインを追加
+    service: ssh://localhost:22
+  - service: http_status:404
+```
+
+```bash
+# macOS のリモートログイン（SSH）を有効化
+sudo systemsetup -setremotelogin on
+```
+
+外出先からの SSH 接続:
+```bash
+# cloudflared がインストールされたクライアントから
+ssh -o ProxyCommand="cloudflared access ssh --hostname ssh.finegate.xyz" user@ssh.finegate.xyz
+
+# または ~/.ssh/config に設定
+# Host mac-mini
+#   HostName ssh.finegate.xyz
+#   ProxyCommand cloudflared access ssh --hostname %h
+#   User <username>
+```
+
+#### 事前準備: スマートプラグ（リモート電源制御）
+
+macOS がフリーズして SSH も応答しない場合の最終手段として、スマートプラグで電源のON/OFFを行う。
+
+| 製品例 | 価格 | 特徴 |
+|--------|------|------|
+| SwitchBot プラグミニ | ~¥1,500 | スマホアプリ・API 対応、安価 |
+| TP-Link Tapo P105 | ~¥1,200 | スマホアプリ対応、入手しやすい |
+| Meross スマートプラグ | ~¥1,500 | HomeKit 対応 |
+
+**復旧手順**（macOS フリーズ時）:
+1. スマホアプリでスマートプラグの電源を **OFF**
+2. 10秒待機
+3. スマートプラグの電源を **ON**
+4. macOS が `autorestart` 設定により自動起動
+5. `launchd` により cloudflared + Agent プロセスが自動起動
+6. Cloudflare Tunnel が再接続され、サービス復旧
+
+> 全体の復旧時間: 約2〜3分（起動 + サービス起動 + Tunnel 再接続）
+
+#### 事前準備: ヘルスチェック & 自動通知
+
+Mac Mini がダウンした際に即座に気づけるよう、外部からのヘルスチェックを設定する。
+
+**方法 1: 外部監視サービス（推奨）**
+
+[UptimeRobot](https://uptimerobot.com/)（無料プラン: 5分間隔）や [Healthchecks.io](https://healthchecks.io/) を使用:
+- `https://agent.finegate.xyz/health` エンドポイントを監視（※要実装）
+- ダウン検知時に Slack / メール通知
+
+**方法 2: cron + Slack 通知（Mac Mini 側）**
+
+```bash
+# /usr/local/bin/finegate-healthcheck.sh
+#!/bin/bash
+RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8787/health 2>/dev/null)
+if [ "$RESPONSE" != "200" ]; then
+  # Agent が応答しない場合、launchd で再起動を試みる
+  launchctl stop com.finegate.agent
+  sleep 2
+  launchctl start com.finegate.agent
+fi
+```
+
+```bash
+# crontab -e
+*/5 * * * * /usr/local/bin/finegate-healthcheck.sh
+```
+
+#### リモート復旧の全体フロー
+
+```
+障害発生
+  ↓
+外部ヘルスチェックが検知 → Slack 通知
+  ↓
+① プロセスクラッシュ?
+  → launchd が自動復旧（対応不要）
+  ↓
+② SSH 接続可能?
+  → cloudflared access ssh で接続
+  → ログ確認・手動でサービス再起動
+  ↓
+③ SSH 不通（OS フリーズ等）?
+  → スマートプラグでリモート電源OFF/ON
+  → macOS 自動起動 → サービス自動復旧
+  ↓
+④ 上記すべて失敗?
+  → ハードウェア障害の可能性
+  → AWS Terraform apply でフェイルオーバー（約30分）
+```
+
+> **まとめ**: 適切な事前準備（macOS 設定 + スマートプラグ + ヘルスチェック）を行えば、**ハードウェア故障とインターネット回線障害を除くほぼすべての障害から、外出先でもリモート復旧が可能**。さらに、AWS の Terraform 構成を常時デプロイ可能な状態に保つことで、Mac Mini の完全故障時にも約30分で AWS へフェイルオーバーできる。
+
+### 9.8. 総合評価
 
 **現在の用途（個人開発アシスタント）であれば、自宅 Mac Mini M4 が最もコストパフォーマンスが高い。**
 
