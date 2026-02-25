@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- サービス識別名 -->
+    <key>Label</key>
+    <string>com.finegate.dev-assistant-agent</string>
+
+    <!-- 実行コマンド: caffeinate -s でスリープ防止しながら node サーバーを起動 -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/caffeinate</string>
+        <string>-s</string>
+        <string>/usr/local/bin/node</string>
+        <string>dist/server.js</string>
+    </array>
+
+    <!-- 作業ディレクトリ（環境に合わせて変更してください） -->
+    <key>WorkingDirectory</key>
+    <string>/Users/takeuchiyosuke/work/dev-assistant-agent</string>
+
+    <!-- 環境変数（.env ファイルの内容をここに設定、または PATH を通す） -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+        <key>NODE_ENV</key>
+        <string>production</string>
+    </dict>
+
+    <!-- ログイン時に自動起動 -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- クラッシュ時に自動再起動 -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- 再起動間隔（秒）: クラッシュループ防止 -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <!-- 標準出力ログ -->
+    <key>StandardOutPath</key>
+    <string>/Users/takeuchiyosuke/Library/Logs/finegate/server.stdout.log</string>
+
+    <!-- 標準エラーログ -->
+    <key>StandardErrorPath</key>
+    <string>/Users/takeuchiyosuke/Library/Logs/finegate/server.stderr.log</string>
+
+    <!-- プロセスタイプ: バックグラウンド -->
+    <key>ProcessType</key>
+    <string>Standard</string>
+</dict>
+</plist>
