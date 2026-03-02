@@ -198,12 +198,6 @@ export function buildDoModalView(channelId: string): Record<string, unknown> {
             },
             {
                 type: 'input',
-                block_id: 'branch',
-                label: { type: 'plain_text', text: 'ブランチ名' },
-                element: { type: 'plain_text_input', action_id: 'value' },
-            },
-            {
-                type: 'input',
                 block_id: 'pbi',
                 label: { type: 'plain_text', text: 'PBI番号' },
                 element: { type: 'plain_text_input', action_id: 'value' },
