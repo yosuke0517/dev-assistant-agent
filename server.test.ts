@@ -5,6 +5,7 @@ import {
     extractRelatedRepos,
     extractResultText,
     FollowUpHandler,
+    getRepoConfig,
     InteractiveHandler,
     ProgressTracker,
     parseInput,
@@ -174,6 +175,40 @@ describe('parseInput', () => {
             issueId: '46',
             baseBranch: 'feat/issue-46',
             userRequest: 'テストを追加してほしい',
+        });
+    });
+});
+
+describe('getRepoConfig', () => {
+    it('agentの場合、dev-assistant-agentを返しisGitHubがtrue', () => {
+        const config = getRepoConfig('agent');
+        expect(config).toEqual({
+            displayName: 'dev-assistant-agent',
+            isGitHub: true,
+        });
+    });
+
+    it('jjpの場合、jjp-loadsheet-uiを返しisGitHubがtrue', () => {
+        const config = getRepoConfig('jjp');
+        expect(config).toEqual({
+            displayName: 'jjp-loadsheet-ui',
+            isGitHub: true,
+        });
+    });
+
+    it('その他のリポジトリはフォルダ名をそのまま返しisGitHubがfalse', () => {
+        const config = getRepoConfig('circus_backend');
+        expect(config).toEqual({
+            displayName: 'circus_backend',
+            isGitHub: false,
+        });
+    });
+
+    it('未知のリポジトリ名でもフォルダ名をそのまま返す', () => {
+        const config = getRepoConfig('some_new_repo');
+        expect(config).toEqual({
+            displayName: 'some_new_repo',
+            isGitHub: false,
         });
     });
 });
