@@ -13,6 +13,8 @@ ingress:
 --------------------------------------------------
 
 ## 2. 🚀 日々の起動手順
+
+### 方法A: 手動起動（ターミナル2つ）
 1. トンネル起動 (Terminal 1):
    cloudflared tunnel run agent
 
@@ -23,6 +25,24 @@ ingress:
 
    【本番環境 (AWS等)】
    cd ~/work/dev-assistant-agent && npm run build && npm start
+
+### 方法B: スリープ抑止付き一括起動（推奨）
+   cd ~/work/dev-assistant-agent && ./scripts/start-with-keepalive.sh
+   # 開発モード: ./scripts/start-with-keepalive.sh dev
+
+### 方法C: launchdサービス化（蓋閉じ対応・最推奨）
+   cd ~/work/dev-assistant-agent && ./scripts/setup-launchd.sh
+   # ログイン時に自動起動、異常終了時に自動再起動される
+   # 詳細: docs/prevent-sleep-guide.md
+
+## 2.1. 🔋 蓋閉じ時のスリープ防止設定
+
+MacBookの蓋を閉じてもシステムを稼働させるには、以下のpmset設定が必要:
+
+   sudo pmset -a disablesleep 1
+   sudo pmset -a sleep 0
+
+詳細な設定ガイド: docs/prevent-sleep-guide.md
 
 ## 3. 📝 使い方
 Slackで以下のように送信してください。
