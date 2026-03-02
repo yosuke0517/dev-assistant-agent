@@ -35,7 +35,7 @@ if [ "$FOLDER_NAME" = "agent" ]; then
     TARGET_PATH="$AGENT_PROJECT_PATH"
     GITHUB_REPO="yosuke0517/dev-assistant-agent"
 elif [ "$FOLDER_NAME" = "jjp" ]; then
-    TARGET_PATH="$WORKSPACE_ROOT/jjp-loadsheet-ui"
+    TARGET_PATH="$JJP_PROJECT_PATH"
     GITHUB_REPO="Route-sec/jjp-loadsheet-ui"
 else
     TARGET_PATH="$WORKSPACE_ROOT/$FOLDER_NAME"
@@ -189,7 +189,7 @@ if [ -n "${RELATED_REPOS:-}" ]; then
         if [ "$REL_REPO_NAME" = "agent" ]; then
             REL_REPO_PATH="$AGENT_PROJECT_PATH"
         elif [ "$REL_REPO_NAME" = "jjp" ]; then
-            REL_REPO_PATH="$WORKSPACE_ROOT/jjp-loadsheet-ui"
+            REL_REPO_PATH="$JJP_PROJECT_PATH"
         else
             REL_REPO_PATH="$WORKSPACE_ROOT/$REL_REPO_NAME"
         fi

@@ -1641,15 +1641,14 @@ describe('buildDoModalView', () => {
         expect(metadata.channel_id).toBe('C999888');
     });
 
-    it('5つの入力ブロックを持つ', () => {
+    it('4つの入力ブロックを持つ', () => {
         const view = buildDoModalView('C123456');
         const blocks = view.blocks as Array<{ block_id: string }>;
-        expect(blocks).toHaveLength(5);
+        expect(blocks).toHaveLength(4);
         expect(blocks[0].block_id).toBe('repository');
-        expect(blocks[1].block_id).toBe('branch');
-        expect(blocks[2].block_id).toBe('pbi');
-        expect(blocks[3].block_id).toBe('base_branch');
-        expect(blocks[4].block_id).toBe('fix_description');
+        expect(blocks[1].block_id).toBe('pbi');
+        expect(blocks[2].block_id).toBe('base_branch');
+        expect(blocks[3].block_id).toBe('fix_description');
     });
 
     it('repositoryブロックに6つのオプションがある', () => {
@@ -1668,8 +1667,8 @@ describe('buildDoModalView', () => {
             block_id: string;
             optional?: boolean;
         }>;
-        expect(blocks[3].optional).toBe(true); // base_branch
-        expect(blocks[4].optional).toBe(true); // fix_description
+        expect(blocks[2].optional).toBe(true); // base_branch
+        expect(blocks[3].optional).toBe(true); // fix_description
     });
 });
 
