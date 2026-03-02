@@ -14,6 +14,26 @@ import {
 export { formatMention, postToSlack, waitForSlackReply };
 export type { FetchFn, RetryOptions, SlackReply, WaitForSlackReplyOptions };
 
+export interface RepoConfig {
+    displayName: string;
+    isGitHub: boolean;
+}
+
+/**
+ * フォルダ名（エイリアス）からリポジトリ設定を返す
+ * GitHub Issuesを使うリポジトリと、Backlogを使うリポジトリを区別する
+ */
+export function getRepoConfig(folder: string): RepoConfig {
+    switch (folder) {
+        case 'agent':
+            return { displayName: 'dev-assistant-agent', isGitHub: true };
+        case 'jjp':
+            return { displayName: 'jjp-loadsheet-ui', isGitHub: true };
+        default:
+            return { displayName: folder, isGitHub: false };
+    }
+}
+
 type PostFn = typeof postToSlack;
 
 const app = express();
@@ -544,8 +564,8 @@ export function spawnWorker(
         if (extraPrompt) args.push(extraPrompt);
 
         // worktree パスを生成して stealth-run.sh に渡す
-        const repoName = folder === 'agent' ? 'dev-assistant-agent' : folder;
-        const worktreePath = `/tmp/finegate-worktrees/${repoName}-${Date.now()}`;
+        const worktreeRepoName = getRepoConfig(folder).displayName;
+        const worktreePath = `/tmp/finegate-worktrees/${worktreeRepoName}-${Date.now()}`;
 
         // PTY経由で起動（バッファリング防止のためTTYが必要）
         const worker = pty.spawn('/bin/zsh', args, {
@@ -714,9 +734,11 @@ app.post('/do', async (req: Request, res: Response) => {
         return;
     }
 
-    const isAgent = folder === 'agent';
-    const displayName = isAgent ? 'dev-assistant-agent' : folder;
-    const issueLabel = isAgent ? `GitHub Issue #${issueId}` : issueId;
+    const repoConfig = getRepoConfig(folder);
+    const displayName = repoConfig.displayName;
+    const issueLabel = repoConfig.isGitHub
+        ? `GitHub Issue #${issueId}`
+        : issueId;
 
     // 1. 即レス（Slack 3秒ルール）
     res.send(

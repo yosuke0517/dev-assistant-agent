@@ -26,13 +26,17 @@ if [ -z "$WORKSPACE_ROOT" ] || [ -z "$AGENT_PROJECT_PATH" ]; then
     exit 1
 fi
 
-# ルーティング: agentキーワードの場合は本プロジェクトを対象にする
+# ルーティング: エイリアスに応じたパス解決とタスク管理システム選択
+# GITHUB_REPO: 設定時はGitHub Issuesを使用、空の場合はBacklogを使用
 if [ "$FOLDER_NAME" = "agent" ]; then
     TARGET_PATH="$AGENT_PROJECT_PATH"
-    IS_SELF_PROJECT=true
+    GITHUB_REPO="yosuke0517/dev-assistant-agent"
+elif [ "$FOLDER_NAME" = "jjp" ]; then
+    TARGET_PATH="$WORKSPACE_ROOT/jjp-loadsheet-ui"
+    GITHUB_REPO="Route-sec/jjp-loadsheet-ui"
 else
     TARGET_PATH="$WORKSPACE_ROOT/$FOLDER_NAME"
-    IS_SELF_PROJECT=false
+    GITHUB_REPO=""
 fi
 
 # 1. 指定されたフォルダの存在チェック
@@ -87,7 +91,7 @@ if [ -n "$USER_REQUEST" ]; then
         WORK_BRANCH="$BASE_BRANCH"
     else
         # ブランチ未指定: 課題IDから既存のフィーチャーブランチを自動検出
-        if [ "$IS_SELF_PROJECT" = true ]; then
+        if [ -n "$GITHUB_REPO" ]; then
             for prefix in "feat" "fix"; do
                 git -C "$TARGET_PATH" fetch origin "${prefix}/issue-${ISSUE_ID}" 2>/dev/null || true
                 if git -C "$TARGET_PATH" rev-parse --verify "origin/${prefix}/issue-${ISSUE_ID}" >/dev/null 2>&1; then
@@ -111,7 +115,7 @@ if [ -n "$USER_REQUEST" ]; then
         echo "Work branch (auto-detected): $WORK_BRANCH"
     fi
 elif [ -n "$FOLLOW_UP_MESSAGE" ]; then
-    if [ "$IS_SELF_PROJECT" = true ]; then
+    if [ -n "$GITHUB_REPO" ]; then
         for prefix in "feat" "fix"; do
             if git -C "$TARGET_PATH" rev-parse --verify "origin/${prefix}/issue-${ISSUE_ID}" >/dev/null 2>&1; then
                 TARGET_BRANCH="${prefix}/issue-${ISSUE_ID}"
@@ -178,9 +182,11 @@ if [ -n "${RELATED_REPOS:-}" ]; then
             REL_REPO_BRANCH=""
         fi
 
-        # 関連リポジトリのパスを解決
+        # 関連リポジトリのパスを解決（エイリアス対応）
         if [ "$REL_REPO_NAME" = "agent" ]; then
             REL_REPO_PATH="$AGENT_PROJECT_PATH"
+        elif [ "$REL_REPO_NAME" = "jjp" ]; then
+            REL_REPO_PATH="$WORKSPACE_ROOT/jjp-loadsheet-ui"
         else
             REL_REPO_PATH="$WORKSPACE_ROOT/$REL_REPO_NAME"
         fi
@@ -368,9 +374,9 @@ git config user.email "$GIT_USER_EMAIL"
 # 9. エージェントによる実装実行
 if [ -n "$FOLLOW_UP_MESSAGE" ]; then
     # フォローアップモード: 既存ブランチで追加依頼を処理
-    if [ "$IS_SELF_PROJECT" = true ]; then
-        echo "Claude Code starting follow-up for GitHub Issue: #${ISSUE_ID}..."
-        PROMPT="前回のタスクでGitHub Issue #${ISSUE_ID}に対する実装を行い、PRを作成しました。
+    if [ -n "$GITHUB_REPO" ]; then
+        echo "Claude Code starting follow-up for GitHub Issue: #${ISSUE_ID} (${GITHUB_REPO})..."
+        PROMPT="前回のタスクでGitHub Issue #${ISSUE_ID}（${GITHUB_REPO}）に対する実装を行い、PRを作成しました。
 ユーザーから追加の依頼があります。
 
 【追加依頼】
@@ -424,11 +430,11 @@ ${FOLLOW_UP_MESSAGE}
 elif [ -n "$USER_REQUEST" ]; then
     # ユーザー要望モード: 既存ブランチで要望を実装（オープン済みPRの修正等）
     # WORK_BRANCH: 明示指定時は BASE_BRANCH、未指定時は自動検出されたブランチ
-    if [ "$IS_SELF_PROJECT" = true ]; then
-        echo "Claude Code starting user request for GitHub Issue: #${ISSUE_ID} on branch ${WORK_BRANCH}..."
+    if [ -n "$GITHUB_REPO" ]; then
+        echo "Claude Code starting user request for GitHub Issue: #${ISSUE_ID} on branch ${WORK_BRANCH} (${GITHUB_REPO})..."
         PROMPT="以下の作業を実行してください。
 
-【リポジトリ】yosuke0517/dev-assistant-agent
+【リポジトリ】${GITHUB_REPO}
 【対象ブランチ】${WORK_BRANCH}（既存ブランチ）
 【課題ID】GitHub Issue #${ISSUE_ID}
 【ユーザーの要望】
@@ -480,11 +486,11 @@ ${USER_REQUEST}
 - 設計判断で迷った場合（例: このロジックはどこに置くべきか）
 勝手に解釈して進めず、必ず確認を取ってから実装してください。"
     fi
-elif [ "$IS_SELF_PROJECT" = true ]; then
-    echo "Claude Code starting for GitHub Issue: #${ISSUE_ID}..."
+elif [ -n "$GITHUB_REPO" ]; then
+    echo "Claude Code starting for GitHub Issue: #${ISSUE_ID} (${GITHUB_REPO})..."
     PROMPT="以下のSTEPに従って作業してください。
 
-STEP1: GitHub MCPを使用して yosuke0517/dev-assistant-agent リポジトリの Issue #${ISSUE_ID} の内容を確認してください。
+STEP1: GitHub MCPを使用して ${GITHUB_REPO} リポジトリの Issue #${ISSUE_ID} の内容を確認してください。
 Issue内容に基づいたブランチを作成してください。フォーマットは feat/issue-${ISSUE_ID} または fix/issue-${ISSUE_ID}（内容に応じて選択）。
 ブランチ作成後、必ずそのブランチに切り替えてください。
 

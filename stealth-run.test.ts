@@ -53,8 +53,13 @@ describe('stealth-run.sh', () => {
             WORKSPACE_ROOT="${workspaceRoot}"
             if [ "$FOLDER_NAME" = "agent" ]; then
                 TARGET_PATH="$AGENT_PROJECT_PATH"
+                GITHUB_REPO="yosuke0517/dev-assistant-agent"
+            elif [ "$FOLDER_NAME" = "jjp" ]; then
+                TARGET_PATH="$WORKSPACE_ROOT/jjp-loadsheet-ui"
+                GITHUB_REPO="Route-sec/jjp-loadsheet-ui"
             else
                 TARGET_PATH="$WORKSPACE_ROOT/$FOLDER_NAME"
+                GITHUB_REPO=""
             fi
             if [ -d "$TARGET_PATH" ]; then
                 echo "exists:$TARGET_PATH"
@@ -66,6 +71,56 @@ describe('stealth-run.sh', () => {
         `;
         const result = execSync(checkScript, { encoding: 'utf8' });
         expect(result.trim()).toContain(`exists:${agentProjectPath}`);
+    });
+
+    it('jjpキーワードの場合、正しいパスとGITHUB_REPOが設定される', () => {
+        const workspaceRoot = process.env.WORKSPACE_ROOT || '/tmp';
+        const checkScript = `
+            FOLDER_NAME="jjp"
+            AGENT_PROJECT_PATH="/dummy"
+            WORKSPACE_ROOT="${workspaceRoot}"
+            if [ "$FOLDER_NAME" = "agent" ]; then
+                TARGET_PATH="$AGENT_PROJECT_PATH"
+                GITHUB_REPO="yosuke0517/dev-assistant-agent"
+            elif [ "$FOLDER_NAME" = "jjp" ]; then
+                TARGET_PATH="$WORKSPACE_ROOT/jjp-loadsheet-ui"
+                GITHUB_REPO="Route-sec/jjp-loadsheet-ui"
+            else
+                TARGET_PATH="$WORKSPACE_ROOT/$FOLDER_NAME"
+                GITHUB_REPO=""
+            fi
+            echo "path:$TARGET_PATH"
+            echo "repo:$GITHUB_REPO"
+        `;
+        const result = execSync(checkScript, { encoding: 'utf8' });
+        expect(result).toContain(`path:${workspaceRoot}/jjp-loadsheet-ui`);
+        expect(result).toContain('repo:Route-sec/jjp-loadsheet-ui');
+    });
+
+    it('GITHUB_REPOが設定されたリポジトリではGitHub Issuesプロンプトが使用される', () => {
+        const checkScript = `
+            GITHUB_REPO="Route-sec/jjp-loadsheet-ui"
+            if [ -n "$GITHUB_REPO" ]; then
+                echo "github_issues"
+            else
+                echo "backlog"
+            fi
+        `;
+        const result = execSync(checkScript, { encoding: 'utf8' });
+        expect(result.trim()).toBe('github_issues');
+    });
+
+    it('GITHUB_REPOが空のリポジトリではBacklogプロンプトが使用される', () => {
+        const checkScript = `
+            GITHUB_REPO=""
+            if [ -n "$GITHUB_REPO" ]; then
+                echo "github_issues"
+            else
+                echo "backlog"
+            fi
+        `;
+        const result = execSync(checkScript, { encoding: 'utf8' });
+        expect(result.trim()).toBe('backlog');
     });
 
     it('CLAUDE.mdファイルが存在し、ask_humanの使用指示が含まれる', async () => {
@@ -260,6 +315,34 @@ describe('stealth-run.sh', () => {
         expect(content).toContain('コード変更を伴わない作業の場合');
     });
 
+    it('GITHUB_REPO変数によるタスク管理システム選択ロジックが含まれる', async () => {
+        const fs = await import('node:fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        // GITHUB_REPO変数の定義
+        expect(content).toContain(
+            'GITHUB_REPO="yosuke0517/dev-assistant-agent"',
+        );
+        expect(content).toContain('GITHUB_REPO="Route-sec/jjp-loadsheet-ui"');
+        expect(content).toContain('GITHUB_REPO=""');
+        // GITHUB_REPOによる分岐
+        expect(content).toContain('if [ -n "$GITHUB_REPO" ]');
+    });
+
+    it('jjpエイリアスのルーティング定義が含まれる', async () => {
+        const fs = await import('node:fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        expect(content).toContain('FOLDER_NAME" = "jjp"');
+        expect(content).toContain('jjp-loadsheet-ui');
+        expect(content).toContain('Route-sec/jjp-loadsheet-ui');
+    });
+
+    it('GitHub Issueプロンプトでリポジトリ名がGITHUB_REPO変数から参照される', async () => {
+        const fs = await import('node:fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: shell variable reference, not JS template
+        expect(content).toContain('${GITHUB_REPO} リポジトリの Issue');
+    });
+
     it('GitHub Issue用プロンプトにもPR不要タスクの対応指示が含まれる', async () => {
         const fs = await import('node:fs');
         const content = fs.readFileSync(scriptPath, 'utf8');
@@ -276,7 +359,7 @@ describe('stealth-run.sh', () => {
         // GitHub用プロンプトとBacklog用プロンプトの両方にdraft指示がある
         const draftMatches = content.match(/draft状態で作成/g);
         expect(draftMatches).not.toBeNull();
-        expect(draftMatches!.length).toBeGreaterThanOrEqual(2);
+        expect(draftMatches?.length).toBeGreaterThanOrEqual(2);
         expect(content).toContain('--draft');
     });
 
@@ -286,7 +369,7 @@ describe('stealth-run.sh', () => {
         // GitHub用プロンプトとBacklog用プロンプトの両方にベースブランチ指定がある
         const baseMatches = content.match(/--base \$\{BASE_BRANCH\}/g);
         expect(baseMatches).not.toBeNull();
-        expect(baseMatches!.length).toBeGreaterThanOrEqual(2);
+        expect(baseMatches?.length).toBeGreaterThanOrEqual(2);
     });
 
     it('BASE_BRANCH_ARG に "undefined" を渡すとブランチ検証エラーにならない', () => {
