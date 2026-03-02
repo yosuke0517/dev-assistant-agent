@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express, { type Request, type Response } from 'express';
+import fetch from 'node-fetch';
 import pty from 'node-pty';
 import {
     type FetchFn,
@@ -129,6 +130,176 @@ export function parseInput(rawText: string): ParsedInput {
         baseBranch,
         userRequest: remaining || undefined,
     };
+}
+
+/**
+ * /do コマンドのモーダルビュー定義を構築する
+ * private_metadata にチャンネルIDを含めて、Submitハンドラで取得できるようにする
+ */
+export function buildDoModalView(channelId: string): Record<string, unknown> {
+    return {
+        type: 'modal',
+        callback_id: 'do_modal',
+        private_metadata: JSON.stringify({ channel_id: channelId }),
+        title: { type: 'plain_text', text: 'エージェントに指示' },
+        submit: { type: 'plain_text', text: '実行' },
+        close: { type: 'plain_text', text: 'キャンセル' },
+        blocks: [
+            {
+                type: 'input',
+                block_id: 'repository',
+                label: { type: 'plain_text', text: 'リポジトリ' },
+                element: {
+                    type: 'static_select',
+                    action_id: 'value',
+                    placeholder: {
+                        type: 'plain_text',
+                        text: 'リポジトリを選択',
+                    },
+                    options: [
+                        {
+                            text: { type: 'plain_text', text: 'agent' },
+                            value: 'agent',
+                        },
+                        {
+                            text: { type: 'plain_text', text: 'jjp' },
+                            value: 'jjp',
+                        },
+                        {
+                            text: {
+                                type: 'plain_text',
+                                text: 'circus_backend',
+                            },
+                            value: 'circus_backend',
+                        },
+                        {
+                            text: {
+                                type: 'plain_text',
+                                text: 'circus_frontend',
+                            },
+                            value: 'circus_frontend',
+                        },
+                        {
+                            text: {
+                                type: 'plain_text',
+                                text: 'circus_agent_ecosystem',
+                            },
+                            value: 'circus_agent_ecosystem',
+                        },
+                        {
+                            text: {
+                                type: 'plain_text',
+                                text: 'circus_backend_v2',
+                            },
+                            value: 'circus_backend_v2',
+                        },
+                    ],
+                },
+            },
+            {
+                type: 'input',
+                block_id: 'branch',
+                label: { type: 'plain_text', text: 'ブランチ名' },
+                element: { type: 'plain_text_input', action_id: 'value' },
+            },
+            {
+                type: 'input',
+                block_id: 'pbi',
+                label: { type: 'plain_text', text: 'PBI番号' },
+                element: { type: 'plain_text_input', action_id: 'value' },
+            },
+            {
+                type: 'input',
+                block_id: 'base_branch',
+                label: { type: 'plain_text', text: 'ベースブランチ' },
+                element: { type: 'plain_text_input', action_id: 'value' },
+                optional: true,
+            },
+            {
+                type: 'input',
+                block_id: 'fix_description',
+                label: { type: 'plain_text', text: '指示内容' },
+                element: {
+                    type: 'plain_text_input',
+                    action_id: 'value',
+                    multiline: true,
+                },
+                optional: true,
+            },
+        ],
+    };
+}
+
+/**
+ * Slack views.open APIを呼び出してモーダルを開く
+ */
+export async function openModal(
+    triggerId: string,
+    channelId: string,
+    fetchFn: FetchFn = fetch as unknown as FetchFn,
+): Promise<boolean> {
+    const token = process.env.SLACK_BOT_TOKEN;
+    if (!token) {
+        console.error('SLACK_BOT_TOKEN 未設定');
+        return false;
+    }
+
+    try {
+        const res = await fetchFn('https://slack.com/api/views.open', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+                trigger_id: triggerId,
+                view: buildDoModalView(channelId),
+            }),
+        });
+        const data = await res.json();
+        if (!data.ok) {
+            console.error('views.open API エラー:', data.error);
+            return false;
+        }
+        return true;
+    } catch (err: unknown) {
+        console.error('views.open 送信エラー:', (err as Error).message);
+        return false;
+    }
+}
+
+/**
+ * Slackモーダルのview_submissionペイロードから入力値を抽出する
+ */
+export interface ModalValues {
+    folder: string;
+    branchName: string;
+    issueId: string;
+    baseBranch: string | undefined;
+    userRequest: string | undefined;
+}
+
+interface SlackViewStateValues {
+    [blockId: string]: {
+        [actionId: string]: {
+            type: string;
+            value?: string | null;
+            selected_option?: { value: string } | null;
+        };
+    };
+}
+
+export function parseModalValues(
+    stateValues: SlackViewStateValues,
+): ModalValues {
+    const repository =
+        stateValues.repository?.value?.selected_option?.value ?? '';
+    const branchName = stateValues.branch?.value?.value ?? '';
+    const issueId = stateValues.pbi?.value?.value ?? '';
+    const baseBranch = stateValues.base_branch?.value?.value || undefined;
+    const userRequest = stateValues.fix_description?.value?.value || undefined;
+
+    return { folder: repository, branchName, issueId, baseBranch, userRequest };
 }
 
 function timestamp(): string {
@@ -551,6 +722,7 @@ export function spawnWorker(
     followUpMessage: string | null = null,
     userRequest: string | null = null,
     relatedRepos: RelatedRepo[] = [],
+    branchName: string | null = null,
 ): Promise<SpawnWorkerResult> {
     return new Promise((resolve) => {
         // Claude Code内から起動された場合のネスト検出を回避
@@ -581,6 +753,7 @@ export function spawnWorker(
                 WORKTREE_PATH: worktreePath,
                 SLACK_CHANNEL: tracker?.channel || '',
                 SLACK_THREAD_TS: tracker?.threadTs || '',
+                ...(branchName && { BRANCH_NAME: branchName }),
                 ...(followUpMessage && {
                     FOLLOW_UP_MESSAGE: followUpMessage,
                 }),
@@ -722,17 +895,35 @@ export function extractErrorSummary(output: string): string {
     return '原因不明のエラーで終了しました（ログを確認してください）';
 }
 
-app.post('/do', async (req: Request, res: Response) => {
-    const rawText = req.body.text || '';
-    const { cleanedText, relatedRepos } = extractRelatedRepos(rawText);
-    const { folder, issueId, baseBranch, userRequest } =
-        parseInput(cleanedText);
-    const channelId = req.body.channel_id;
+/**
+ * エージェントタスクのパラメータ
+ */
+export interface AgentTaskParams {
+    folder: string;
+    issueId: string;
+    baseBranch?: string;
+    userRequest?: string;
+    branchName?: string;
+    relatedRepos: RelatedRepo[];
+    channelId: string;
+    rawCommand?: string;
+}
 
-    if (!folder || !issueId) {
-        res.status(400).send('引数不足。例: circus_agent_ecosystem RA_DEV-81');
-        return;
-    }
+/**
+ * エージェントタスクを実行する（Slack通知・リトライ・フォローアップを含む）
+ * /do モーダルのSubmitハンドラから呼び出される
+ */
+export async function startAgentTask(params: AgentTaskParams): Promise<void> {
+    const {
+        folder,
+        issueId,
+        baseBranch,
+        userRequest,
+        branchName,
+        relatedRepos,
+        channelId,
+        rawCommand,
+    } = params;
 
     const repoConfig = getRepoConfig(folder);
     const displayName = repoConfig.displayName;
@@ -740,28 +931,23 @@ app.post('/do', async (req: Request, res: Response) => {
         ? `GitHub Issue #${issueId}`
         : issueId;
 
-    // 1. 即レス（Slack 3秒ルール）
-    res.send(
-        `了解。${displayName} にて ${issueLabel} の対応を開始しました。MBPのターミナルで進捗を確認してください。`,
-    );
-
     console.log(
         `\n${timestamp()} 🚀 実行開始: ${displayName}, ID: ${issueLabel}`,
     );
 
-    // 2. 親メッセージを chat.postMessage で投稿 → ts (スレッドID) 取得
+    // 1. 親メッセージを chat.postMessage で投稿 → ts (スレッドID) 取得
     const parentTs = await postToSlack(
         channelId,
         `🚀 *${displayName}* にて *${issueLabel}* の対応を開始しました。\n進捗はこのスレッドでお知らせします。`,
     );
 
-    // 3. Slack進捗通知トラッカー（1分ごとにスレッドへ進捗を送信）
+    // 2. Slack進捗通知トラッカー（1分ごとにスレッドへ進捗を送信）
     const tracker = new ProgressTracker(channelId, issueId, parentTs);
     tracker.start();
 
-    // 4. インタラクティブハンドラー（エラー時にSlackで確認）
+    // 3. インタラクティブハンドラー（エラー時にSlackで確認）
     const interactive = new InteractiveHandler(channelId, parentTs, {
-        originalCommand: rawText.trim() || undefined,
+        originalCommand: rawCommand || undefined,
     });
 
     const MAX_RETRIES = 3;
@@ -792,6 +978,7 @@ app.post('/do', async (req: Request, res: Response) => {
             null,
             userRequest || null,
             relatedRepos,
+            branchName || null,
         );
         lastExitCode = exitCode;
         lastOutput = output;
@@ -844,10 +1031,10 @@ app.post('/do', async (req: Request, res: Response) => {
         }
     }
 
-    // 5. タイマー停止
+    // 4. タイマー停止
     tracker.stop();
 
-    // 6. 完了メッセージをスレッドに投稿
+    // 5. 完了メッセージをスレッドに投稿
     if (channelId && parentTs) {
         const prUrl = extractLastPrUrl(lastOutput);
         let resultMessage: string;
@@ -881,7 +1068,7 @@ app.post('/do', async (req: Request, res: Response) => {
         }
     }
 
-    // 7. フォローアップループ: タスク成功後に追加依頼を待機
+    // 6. フォローアップループ: タスク成功後に追加依頼を待機
     if (lastExitCode === 0 && channelId && parentTs) {
         const followUpHandler = new FollowUpHandler(channelId, parentTs);
         const MAX_FOLLOW_UPS = 5;
@@ -929,6 +1116,7 @@ app.post('/do', async (req: Request, res: Response) => {
                 decision.message,
                 null,
                 relatedRepos,
+                branchName || null,
             );
 
             tracker.stop();
@@ -957,13 +1145,113 @@ app.post('/do', async (req: Request, res: Response) => {
             );
         }
     }
+}
+
+/**
+ * /do スラッシュコマンドハンドラー
+ * モーダルを開いてユーザー入力を受け付ける
+ */
+app.post('/do', async (req: Request, res: Response) => {
+    const triggerId = req.body.trigger_id;
+    const channelId = req.body.channel_id;
+
+    if (!triggerId) {
+        res.status(400).send(
+            'trigger_id が必要です。Slackのスラッシュコマンドから実行してください。',
+        );
+        return;
+    }
+
+    // 即座にack（Slack 3秒ルール）
+    res.send('');
+
+    // モーダルを開く
+    const success = await openModal(triggerId, channelId);
+    if (!success) {
+        console.error('モーダルの表示に失敗しました');
+    }
+});
+
+/**
+ * Slack Interactivity エンドポイント
+ * モーダルのSubmit（view_submission）を受け取り、エージェントタスクを開始する
+ */
+app.post('/slack/interactions', async (req: Request, res: Response) => {
+    let payload: {
+        type: string;
+        view?: {
+            callback_id?: string;
+            private_metadata?: string;
+            state?: { values: SlackViewStateValues };
+        };
+    };
+
+    try {
+        payload = JSON.parse(req.body.payload);
+    } catch {
+        res.status(400).send('Invalid payload');
+        return;
+    }
+
+    if (
+        payload.type !== 'view_submission' ||
+        payload.view?.callback_id !== 'do_modal'
+    ) {
+        // 未知のインタラクションタイプはackだけして無視
+        res.send('');
+        return;
+    }
+
+    // モーダル送信を受信 → 即座にack（モーダルを閉じる）
+    res.send('');
+
+    const stateValues = payload.view.state?.values;
+    if (!stateValues) return;
+
+    const { folder, branchName, issueId, baseBranch, userRequest } =
+        parseModalValues(stateValues);
+
+    let channelId: string;
+    try {
+        const metadata = JSON.parse(payload.view.private_metadata || '{}');
+        channelId = metadata.channel_id;
+    } catch {
+        console.error('private_metadata のパースに失敗');
+        return;
+    }
+
+    if (!channelId || !folder || !issueId) {
+        console.error('必須フィールドが不足:', {
+            channelId,
+            folder,
+            issueId,
+        });
+        return;
+    }
+
+    const rawCommand = `${folder} ${issueId}${baseBranch ? ` ${baseBranch}` : ''}`;
+
+    // エージェントタスクを非同期で開始
+    startAgentTask({
+        folder,
+        issueId,
+        baseBranch,
+        userRequest,
+        branchName: branchName || undefined,
+        relatedRepos: [],
+        channelId,
+        rawCommand,
+    });
 });
 
 const PORT = 8787;
 app.listen(PORT, () => {
     console.log('----------------------------------------------------');
     console.log(`Finegate Agent Server running on port ${PORT}`);
-    console.log('SlackのRequest URLを以下に設定してください:');
-    console.log('http://あなたのトンネルURL/do');
+    console.log('Slack設定:');
+    console.log('  Slash Command URL: http://あなたのトンネルURL/do');
+    console.log(
+        '  Interactivity URL: http://あなたのトンネルURL/slack/interactions',
+    );
     console.log('----------------------------------------------------');
 });

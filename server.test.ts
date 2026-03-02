@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+    buildDoModalView,
     extractErrorSummary,
     extractLastPrUrl,
     extractRelatedRepos,
@@ -7,8 +8,11 @@ import {
     FollowUpHandler,
     getRepoConfig,
     InteractiveHandler,
+    type ModalValues,
+    openModal,
     ProgressTracker,
     parseInput,
+    parseModalValues,
     postToSlack,
     processStreamEvent,
     waitForSlackReply,
@@ -1612,5 +1616,257 @@ describe('FollowUpHandler', () => {
         expect(sentText).toContain('10分以内');
 
         consoleSpy.mockRestore();
+    });
+});
+
+describe('buildDoModalView', () => {
+    it('正しいcallback_idとtitleを持つモーダルを生成する', () => {
+        const view = buildDoModalView('C123456');
+        expect(view.type).toBe('modal');
+        expect(view.callback_id).toBe('do_modal');
+        expect(view.title).toEqual({
+            type: 'plain_text',
+            text: 'エージェントに指示',
+        });
+        expect(view.submit).toEqual({ type: 'plain_text', text: '実行' });
+        expect(view.close).toEqual({
+            type: 'plain_text',
+            text: 'キャンセル',
+        });
+    });
+
+    it('private_metadataにchannel_idが含まれる', () => {
+        const view = buildDoModalView('C999888');
+        const metadata = JSON.parse(view.private_metadata as string);
+        expect(metadata.channel_id).toBe('C999888');
+    });
+
+    it('5つの入力ブロックを持つ', () => {
+        const view = buildDoModalView('C123456');
+        const blocks = view.blocks as Array<{ block_id: string }>;
+        expect(blocks).toHaveLength(5);
+        expect(blocks[0].block_id).toBe('repository');
+        expect(blocks[1].block_id).toBe('branch');
+        expect(blocks[2].block_id).toBe('pbi');
+        expect(blocks[3].block_id).toBe('base_branch');
+        expect(blocks[4].block_id).toBe('fix_description');
+    });
+
+    it('repositoryブロックに6つのオプションがある', () => {
+        const view = buildDoModalView('C123456');
+        const blocks = view.blocks as Array<{
+            block_id: string;
+            element: { options: unknown[] };
+        }>;
+        const repoBlock = blocks[0];
+        expect(repoBlock.element.options).toHaveLength(6);
+    });
+
+    it('base_branchとfix_descriptionはoptionalフラグを持つ', () => {
+        const view = buildDoModalView('C123456');
+        const blocks = view.blocks as Array<{
+            block_id: string;
+            optional?: boolean;
+        }>;
+        expect(blocks[3].optional).toBe(true); // base_branch
+        expect(blocks[4].optional).toBe(true); // fix_description
+    });
+});
+
+describe('openModal', () => {
+    it('SLACK_BOT_TOKEN未設定の場合はfalseを返す', async () => {
+        const originalToken = process.env.SLACK_BOT_TOKEN;
+        delete process.env.SLACK_BOT_TOKEN;
+        const consoleSpy = vi
+            .spyOn(console, 'error')
+            .mockImplementation(() => {});
+
+        const result = await openModal('trigger123', 'C123456');
+
+        expect(result).toBe(false);
+        expect(consoleSpy).toHaveBeenCalledWith('SLACK_BOT_TOKEN 未設定');
+
+        consoleSpy.mockRestore();
+        if (originalToken !== undefined) {
+            process.env.SLACK_BOT_TOKEN = originalToken;
+        }
+    });
+
+    it('views.open API成功時はtrueを返す', async () => {
+        const originalToken = process.env.SLACK_BOT_TOKEN;
+        process.env.SLACK_BOT_TOKEN = 'xoxb-test-token';
+
+        const mockFetch = vi.fn().mockResolvedValue({
+            json: vi.fn().mockResolvedValue({ ok: true }),
+        });
+
+        const result = await openModal('trigger123', 'C123456', mockFetch);
+
+        expect(result).toBe(true);
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+
+        const callArgs = mockFetch.mock.calls[0];
+        expect(callArgs[0]).toBe('https://slack.com/api/views.open');
+
+        const body = JSON.parse(callArgs[1].body as string);
+        expect(body.trigger_id).toBe('trigger123');
+        expect(body.view.callback_id).toBe('do_modal');
+
+        process.env.SLACK_BOT_TOKEN = originalToken;
+    });
+
+    it('views.open APIエラー時はfalseを返す', async () => {
+        const originalToken = process.env.SLACK_BOT_TOKEN;
+        process.env.SLACK_BOT_TOKEN = 'xoxb-test-token';
+        const consoleSpy = vi
+            .spyOn(console, 'error')
+            .mockImplementation(() => {});
+
+        const mockFetch = vi.fn().mockResolvedValue({
+            json: vi
+                .fn()
+                .mockResolvedValue({ ok: false, error: 'invalid_trigger_id' }),
+        });
+
+        const result = await openModal('bad_trigger', 'C123456', mockFetch);
+
+        expect(result).toBe(false);
+        expect(consoleSpy).toHaveBeenCalledWith(
+            'views.open API エラー:',
+            'invalid_trigger_id',
+        );
+
+        consoleSpy.mockRestore();
+        process.env.SLACK_BOT_TOKEN = originalToken;
+    });
+
+    it('ネットワークエラー時はfalseを返す', async () => {
+        const originalToken = process.env.SLACK_BOT_TOKEN;
+        process.env.SLACK_BOT_TOKEN = 'xoxb-test-token';
+        const consoleSpy = vi
+            .spyOn(console, 'error')
+            .mockImplementation(() => {});
+
+        const mockFetch = vi.fn().mockRejectedValue(new Error('Network error'));
+
+        const result = await openModal('trigger123', 'C123456', mockFetch);
+
+        expect(result).toBe(false);
+        expect(consoleSpy).toHaveBeenCalledWith(
+            'views.open 送信エラー:',
+            'Network error',
+        );
+
+        consoleSpy.mockRestore();
+        process.env.SLACK_BOT_TOKEN = originalToken;
+    });
+});
+
+describe('parseModalValues', () => {
+    it('全フィールドが入力された場合に正しくパースする', () => {
+        const stateValues = {
+            repository: {
+                value: {
+                    type: 'static_select',
+                    selected_option: { value: 'circus_backend' },
+                },
+            },
+            branch: {
+                value: { type: 'plain_text_input', value: 'feat/RA_DEV-85' },
+            },
+            pbi: {
+                value: { type: 'plain_text_input', value: 'RA_DEV-85' },
+            },
+            base_branch: {
+                value: { type: 'plain_text_input', value: 'develop' },
+            },
+            fix_description: {
+                value: {
+                    type: 'plain_text_input',
+                    value: 'バグを修正してください',
+                },
+            },
+        };
+
+        const result: ModalValues = parseModalValues(stateValues);
+
+        expect(result).toEqual({
+            folder: 'circus_backend',
+            branchName: 'feat/RA_DEV-85',
+            issueId: 'RA_DEV-85',
+            baseBranch: 'develop',
+            userRequest: 'バグを修正してください',
+        });
+    });
+
+    it('オプションフィールドが空の場合はundefinedになる', () => {
+        const stateValues = {
+            repository: {
+                value: {
+                    type: 'static_select',
+                    selected_option: { value: 'agent' },
+                },
+            },
+            branch: {
+                value: { type: 'plain_text_input', value: 'feat/issue-42' },
+            },
+            pbi: {
+                value: { type: 'plain_text_input', value: '42' },
+            },
+            base_branch: {
+                value: { type: 'plain_text_input', value: null },
+            },
+            fix_description: {
+                value: { type: 'plain_text_input', value: null },
+            },
+        };
+
+        const result: ModalValues = parseModalValues(stateValues);
+
+        expect(result).toEqual({
+            folder: 'agent',
+            branchName: 'feat/issue-42',
+            issueId: '42',
+            baseBranch: undefined,
+            userRequest: undefined,
+        });
+    });
+
+    it('空のstateValuesでもクラッシュしない', () => {
+        const result: ModalValues = parseModalValues({});
+
+        expect(result).toEqual({
+            folder: '',
+            branchName: '',
+            issueId: '',
+            baseBranch: undefined,
+            userRequest: undefined,
+        });
+    });
+
+    it('selected_optionがnullの場合は空文字を返す', () => {
+        const stateValues = {
+            repository: {
+                value: {
+                    type: 'static_select',
+                    selected_option: null,
+                },
+            },
+            branch: {
+                value: { type: 'plain_text_input', value: 'test' },
+            },
+            pbi: {
+                value: { type: 'plain_text_input', value: '1' },
+            },
+            base_branch: {
+                value: { type: 'plain_text_input', value: null },
+            },
+            fix_description: {
+                value: { type: 'plain_text_input', value: null },
+            },
+        };
+
+        const result: ModalValues = parseModalValues(stateValues);
+        expect(result.folder).toBe('');
     });
 });

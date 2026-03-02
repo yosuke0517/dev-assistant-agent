@@ -15,6 +15,9 @@ ISSUE_ID=$2       # 例: PROJ-123 または GitHub Issue番号
 BASE_BRANCH_ARG=$3 # オプション: ベースブランチ指定（例: develop）
 EXTRA_PROMPT=$4    # オプション: ユーザーからの追加指示（リトライ時に使用）
 
+# モーダルから渡されるブランチ名（環境変数経由）
+BRANCH_NAME=${BRANCH_NAME:-}
+
 # "undefined" 文字列はフロントエンド等で値未設定時に渡されることがあるため除外
 if [ "$BASE_BRANCH_ARG" = "undefined" ]; then
     BASE_BRANCH_ARG=""
@@ -488,10 +491,17 @@ ${USER_REQUEST}
     fi
 elif [ -n "$GITHUB_REPO" ]; then
     echo "Claude Code starting for GitHub Issue: #${ISSUE_ID} (${GITHUB_REPO})..."
+    # BRANCH_NAME が指定されている場合はそのブランチ名を使用、未指定の場合はIssue IDから自動生成
+    if [ -n "$BRANCH_NAME" ]; then
+        BRANCH_INSTRUCTION="ブランチ ${BRANCH_NAME} を作成してください。"
+    else
+        BRANCH_INSTRUCTION="Issue内容に基づいたブランチを作成してください。フォーマットは feat/issue-${ISSUE_ID} または fix/issue-${ISSUE_ID}（内容に応じて選択）。"
+    fi
+
     PROMPT="以下のSTEPに従って作業してください。
 
 STEP1: GitHub MCPを使用して ${GITHUB_REPO} リポジトリの Issue #${ISSUE_ID} の内容を確認してください。
-Issue内容に基づいたブランチを作成してください。フォーマットは feat/issue-${ISSUE_ID} または fix/issue-${ISSUE_ID}（内容に応じて選択）。
+${BRANCH_INSTRUCTION}
 ブランチ作成後、必ずそのブランチに切り替えてください。
 
 STEP2: Issue内容に基づいてコードを実装し、テストをパスさせてください。
@@ -519,9 +529,16 @@ PRのマージ先（ベースブランチ）は ${BASE_BRANCH} を指定して�
 勝手に解釈して進めず、必ず確認を取ってから実装してください。"
 else
     echo "Claude Code starting for Backlog Issue: $ISSUE_ID..."
+    # BRANCH_NAME が指定されている場合はそのブランチ名を使用
+    if [ -n "$BRANCH_NAME" ]; then
+        BACKLOG_BRANCH_INSTRUCTION="ブランチ ${BRANCH_NAME} を作成してください。ブランチ作成後、必ずそのブランチに切り替えてください。"
+    else
+        BACKLOG_BRANCH_INSTRUCTION="課題IDに基づいたブランチを作成してください。フォーマットは feat/${ISSUE_ID} 。例: feat/RA_DEV-1234 。ブランチ作成後、必ずそのブランチに切り替えてください。"
+    fi
+
     PROMPT="以下のSTEPに従って作業してください。
 
-STEP1: Backlog MCPを使用して課題 ${ISSUE_ID} の内容を確認し、課題IDに基づいたブランチを作成してください。フォーマットは feat/${ISSUE_ID} 。例: feat/RA_DEV-1234 。ブランチ作成後、必ずそのブランチに切り替えてください。\
+STEP1: Backlog MCPを使用して課題 ${ISSUE_ID} の内容を確認し、${BACKLOG_BRANCH_INSTRUCTION}\
 
 STEP2: 課題内容に基づいてコードを実装し、テストをパスさせてください。\
 デザインが必要な場合は、まず figma-desktop MCP を試してアプリからデータを取得し、\
