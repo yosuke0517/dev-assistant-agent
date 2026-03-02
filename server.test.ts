@@ -3,6 +3,7 @@ import {
     extractErrorSummary,
     extractLastPrUrl,
     extractRelatedRepos,
+    extractResultText,
     FollowUpHandler,
     InteractiveHandler,
     ProgressTracker,
@@ -1326,6 +1327,60 @@ describe('extractLastPrUrl', () => {
         expect(result).toBe(
             'https://myspace.backlog.jp/git/PROJ/repo/pullRequests/99',
         );
+    });
+});
+
+describe('extractResultText', () => {
+    it('成功時のresultイベントからテキストを抽出できる', () => {
+        const output = [
+            '{"type":"system","session_id":"abc123"}',
+            '{"type":"assistant","message":{"content":[{"type":"text","text":"調査を開始します"}]}}',
+            '{"type":"result","subtype":"success","result":"調査が完了しました。原因はXXXです。","cost_usd":0.05,"num_turns":5,"duration_ms":30000}',
+        ].join('\n');
+        const result = extractResultText(output);
+        expect(result).toBe('調査が完了しました。原因はXXXです。');
+    });
+
+    it('resultイベントが存在しない場合はnullを返す', () => {
+        const output = [
+            '{"type":"system","session_id":"abc123"}',
+            '{"type":"assistant","message":{"content":[{"type":"text","text":"作業中"}]}}',
+        ].join('\n');
+        const result = extractResultText(output);
+        expect(result).toBeNull();
+    });
+
+    it('エラー終了のresultイベントではnullを返す', () => {
+        const output =
+            '{"type":"result","subtype":"error_max_turns","result":"最大ターン数に到達","cost_usd":0.1,"num_turns":50}';
+        const result = extractResultText(output);
+        expect(result).toBeNull();
+    });
+
+    it('ANSIエスケープシーケンスが含まれていても抽出できる', () => {
+        const output =
+            '\x1b[32m{"type":"result","subtype":"success","result":"レポート完了","cost_usd":0.03}\x1b[0m';
+        const result = extractResultText(output);
+        expect(result).toBe('レポート完了');
+    });
+
+    it('resultフィールドが空文字の場合はnullを返す', () => {
+        const output =
+            '{"type":"result","subtype":"success","result":"","cost_usd":0.01}';
+        const result = extractResultText(output);
+        expect(result).toBeNull();
+    });
+
+    it('JSON以外の行が混在していても正しく抽出できる', () => {
+        const output = [
+            'Creating worktree at: /tmp/test',
+            '{"type":"system","session_id":"abc123"}',
+            'Directory changed to: /tmp/test',
+            '{"type":"result","subtype":"success","result":"Issue #66にコメントを追加しました。","cost_usd":0.04}',
+            'Task completed at Mon Jan 1 00:00:00 UTC 2025',
+        ].join('\n');
+        const result = extractResultText(output);
+        expect(result).toBe('Issue #66にコメントを追加しました。');
     });
 });
 

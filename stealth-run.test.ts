@@ -260,6 +260,16 @@ describe('stealth-run.sh', () => {
         expect(content).toContain('コード変更を伴わない作業の場合');
     });
 
+    it('GitHub Issue用プロンプトにもPR不要タスクの対応指示が含まれる', async () => {
+        const fs = await import('node:fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        // GitHub Issue用プロンプトにも調査・レポート系タスクの分岐がある
+        expect(content).toContain('調査・リサーチのみを求める指示の場合');
+        expect(content).toContain(
+            'GitHub Issueへのコメント追加を求める指示の場合',
+        );
+    });
+
     it('PRは必ずdraft状態で作成する指示が含まれる', async () => {
         const fs = await import('node:fs');
         const content = fs.readFileSync(scriptPath, 'utf8');

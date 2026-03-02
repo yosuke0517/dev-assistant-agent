@@ -627,6 +627,31 @@ export function extractLastPrUrl(output: string): string | null {
     return matches[matches.length - 1];
 }
 
+/**
+ * stream-json出力からClaude Codeの最終結果テキストを抽出する
+ * resultイベントのresultフィールドに最終的なテキスト出力が含まれる
+ */
+export function extractResultText(output: string): string | null {
+    const cleaned = output.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+    const lines = cleaned.split('\n');
+
+    for (let i = lines.length - 1; i >= 0; i--) {
+        try {
+            const event = JSON.parse(lines[i].trim()) as StreamEvent;
+            if (
+                event.type === 'result' &&
+                event.subtype === 'success' &&
+                event.result
+            ) {
+                return event.result;
+            }
+        } catch {
+            // JSON以外の行は無視
+        }
+    }
+    return null;
+}
+
 /** 出力からエラーサマリーを抽出する */
 export function extractErrorSummary(output: string): string {
     // ANSIエスケープシーケンスを除去
@@ -803,9 +828,22 @@ app.post('/do', async (req: Request, res: Response) => {
     // 6. 完了メッセージをスレッドに投稿
     if (channelId && parentTs) {
         const prUrl = extractLastPrUrl(lastOutput);
-        const prMessage = prUrl
-            ? `\nPRが作成されました: ${prUrl}`
-            : '\nPRの作成を確認できませんでした。詳細はターミナルのログを確認してください。';
+        let resultMessage: string;
+        if (prUrl) {
+            resultMessage = `\nPRが作成されました: ${prUrl}`;
+        } else {
+            const resultText = extractResultText(lastOutput);
+            if (resultText) {
+                const truncated =
+                    resultText.length > 1500
+                        ? `${resultText.substring(0, 1500)}...`
+                        : resultText;
+                resultMessage = `\n📝 実行結果:\n${truncated}`;
+            } else {
+                resultMessage =
+                    '\nPRの作成を確認できませんでした。詳細はターミナルのログを確認してください。';
+            }
+        }
 
         const retryInfo = attempt > 1 ? ` (試行回数: ${attempt})` : '';
 
@@ -813,7 +851,7 @@ app.post('/do', async (req: Request, res: Response) => {
             const mention = formatMention();
             await postToSlack(
                 channelId,
-                `${mention}${lastExitCode === 0 ? '✅' : '❌'} *${issueLabel}* の対応が${lastExitCode === 0 ? '完了' : '終了'}しました！ (Exit Code: ${lastExitCode})${retryInfo}${prMessage}`,
+                `${mention}${lastExitCode === 0 ? '✅' : '❌'} *${issueLabel}* の対応が${lastExitCode === 0 ? '完了' : '終了'}しました！ (Exit Code: ${lastExitCode})${retryInfo}${resultMessage}`,
                 parentTs,
             );
         } catch (err) {
