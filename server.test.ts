@@ -8,7 +8,9 @@ import {
     FollowUpHandler,
     getRepoConfig,
     InteractiveHandler,
+    isAffirmativeReply,
     isAuthenticationError,
+    LoginHandler,
     type ModalValues,
     openModal,
     ProgressTracker,
@@ -1898,5 +1900,286 @@ describe('parseModalValues', () => {
 
         const result: ModalValues = parseModalValues(stateValues);
         expect(result.folder).toBe('');
+    });
+});
+
+describe('isAffirmativeReply', () => {
+    it('「はい」を肯定として判定する', () => {
+        expect(isAffirmativeReply('はい')).toBe(true);
+    });
+
+    it('「yes」を肯定として判定する', () => {
+        expect(isAffirmativeReply('yes')).toBe(true);
+    });
+
+    it('「Yes」（大文字）を肯定として判定する', () => {
+        expect(isAffirmativeReply('Yes')).toBe(true);
+    });
+
+    it('「y」を肯定として判定する', () => {
+        expect(isAffirmativeReply('y')).toBe(true);
+    });
+
+    it('「ok」を肯定として判定する', () => {
+        expect(isAffirmativeReply('ok')).toBe(true);
+    });
+
+    it('「する」を肯定として判定する', () => {
+        expect(isAffirmativeReply('する')).toBe(true);
+    });
+
+    it('「実行」を肯定として判定する', () => {
+        expect(isAffirmativeReply('実行')).toBe(true);
+    });
+
+    it('「いいえ」を否定として判定する', () => {
+        expect(isAffirmativeReply('いいえ')).toBe(false);
+    });
+
+    it('「no」を否定として判定する', () => {
+        expect(isAffirmativeReply('no')).toBe(false);
+    });
+
+    it('空文字を否定として判定する', () => {
+        expect(isAffirmativeReply('')).toBe(false);
+    });
+
+    it('前後の空白を無視して判定する', () => {
+        expect(isAffirmativeReply('  はい  ')).toBe(true);
+    });
+
+    it('「おk」を肯定として判定する', () => {
+        expect(isAffirmativeReply('おk')).toBe(true);
+    });
+
+    it('「おけ」を肯定として判定する', () => {
+        expect(isAffirmativeReply('おけ')).toBe(true);
+    });
+
+    it('「うん」を肯定として判定する', () => {
+        expect(isAffirmativeReply('うん')).toBe(true);
+    });
+});
+
+describe('LoginHandler', () => {
+    it('channel/threadTs未設定でもインスタンス化できる', () => {
+        const handler = new LoginHandler('C123456', '1234.5678');
+        expect(handler.channel).toBe('C123456');
+        expect(handler.threadTs).toBe('1234.5678');
+    });
+
+    it('ユーザーが「いいえ」と返答した場合falseを返す', async () => {
+        const mockPost = vi.fn().mockResolvedValue('msg-ts-1');
+        const mockWaitReply = vi
+            .fn()
+            .mockResolvedValue({ text: 'いいえ', user: 'U123' });
+
+        const handler = new LoginHandler('C123456', '1234.5678', {
+            postFn: mockPost,
+            waitReplyFn: mockWaitReply,
+        });
+
+        const result = await handler.execute();
+        expect(result).toBe(false);
+        expect(mockPost).toHaveBeenCalledTimes(2); // 確認メッセージ + スキップメッセージ
+    });
+
+    it('ユーザーが返信しなかった場合（タイムアウト）falseを返す', async () => {
+        const mockPost = vi.fn().mockResolvedValue('msg-ts-1');
+        const mockWaitReply = vi.fn().mockResolvedValue(null);
+
+        const handler = new LoginHandler('C123456', '1234.5678', {
+            postFn: mockPost,
+            waitReplyFn: mockWaitReply,
+        });
+
+        const result = await handler.execute();
+        expect(result).toBe(false);
+    });
+
+    it('ユーザーが「はい」と返答し、URL取得に失敗した場合falseを返す', async () => {
+        const mockPost = vi.fn().mockResolvedValue('msg-ts-1');
+        const mockWaitReply = vi
+            .fn()
+            .mockResolvedValue({ text: 'はい', user: 'U123' });
+        const mockCaptureAuth = vi
+            .fn()
+            .mockResolvedValue({ url: null, exitCode: 1 });
+
+        const handler = new LoginHandler('C123456', '1234.5678', {
+            postFn: mockPost,
+            waitReplyFn: mockWaitReply,
+            captureAuthLoginUrlFn: mockCaptureAuth,
+            sleepFn: async () => {},
+        });
+
+        const result = await handler.execute();
+        expect(result).toBe(false);
+        expect(mockCaptureAuth).toHaveBeenCalled();
+    });
+
+    it('ユーザーが「はい」と返答し、リフレッシュトークンで自動ログイン成功した場合trueを返す', async () => {
+        const mockPost = vi.fn().mockResolvedValue('msg-ts-1');
+        const mockWaitReply = vi
+            .fn()
+            .mockResolvedValue({ text: 'はい', user: 'U123' });
+        const mockCaptureAuth = vi.fn().mockResolvedValue({
+            url: 'https://accounts.anthropic.com/auth?code=xxx',
+            exitCode: 0,
+        });
+        const mockCheckAuth = vi
+            .fn()
+            .mockResolvedValue({ loggedIn: true, email: 'test@example.com' });
+
+        // Playwright MCPクライアントのモック
+        const mockCallTool = vi
+            .fn()
+            .mockResolvedValueOnce({ content: [{ text: 'OK' }] }) // browser_navigate
+            .mockResolvedValueOnce({
+                // browser_snapshot - ログイン完了ページ（ログインキーワードなし）
+                content: [
+                    {
+                        text: 'Authentication complete. You can close this window.',
+                    },
+                ],
+            })
+            .mockResolvedValueOnce({ content: [] }); // browser_close
+        const mockClose = vi.fn().mockResolvedValue(undefined);
+        const mockPlaywrightClient = {
+            callTool: mockCallTool,
+            close: mockClose,
+        };
+        const mockCreatePlaywright = vi
+            .fn()
+            .mockResolvedValue(mockPlaywrightClient);
+
+        const handler = new LoginHandler('C123456', '1234.5678', {
+            postFn: mockPost,
+            waitReplyFn: mockWaitReply,
+            captureAuthLoginUrlFn: mockCaptureAuth,
+            checkAuthStatusFn: mockCheckAuth,
+            createPlaywrightClientFn: mockCreatePlaywright as any,
+            sleepFn: async () => {},
+        });
+
+        const result = await handler.execute();
+        expect(result).toBe(true);
+        expect(mockCreatePlaywright).toHaveBeenCalled();
+        expect(mockCallTool).toHaveBeenCalledWith({
+            name: 'browser_navigate',
+            arguments: { url: 'https://accounts.anthropic.com/auth?code=xxx' },
+        });
+        expect(mockCheckAuth).toHaveBeenCalled();
+    });
+
+    it('Playwright接続エラーの場合falseを返す', async () => {
+        const mockPost = vi.fn().mockResolvedValue('msg-ts-1');
+        const mockWaitReply = vi
+            .fn()
+            .mockResolvedValue({ text: 'はい', user: 'U123' });
+        const mockCaptureAuth = vi.fn().mockResolvedValue({
+            url: 'https://accounts.anthropic.com/auth?code=xxx',
+            exitCode: 0,
+        });
+        const mockCreatePlaywright = vi
+            .fn()
+            .mockRejectedValue(new Error('Connection failed'));
+
+        const handler = new LoginHandler('C123456', '1234.5678', {
+            postFn: mockPost,
+            waitReplyFn: mockWaitReply,
+            captureAuthLoginUrlFn: mockCaptureAuth,
+            createPlaywrightClientFn: mockCreatePlaywright as any,
+            sleepFn: async () => {},
+        });
+
+        const result = await handler.execute();
+        expect(result).toBe(false);
+    });
+
+    it('ログインページが表示されユーザーがemail認証を選択した場合のフロー', async () => {
+        let waitReplyCallCount = 0;
+        const mockPost = vi.fn().mockResolvedValue('msg-ts-1');
+        const mockWaitReply = vi.fn().mockImplementation(async () => {
+            waitReplyCallCount++;
+            switch (waitReplyCallCount) {
+                case 1:
+                    return { text: 'はい', user: 'U123' }; // /login実行確認
+                case 2:
+                    return { text: 'email', user: 'U123' }; // 認証方法選択
+                case 3:
+                    return { text: 'test@example.com', user: 'U123' }; // メールアドレス
+                case 4:
+                    return { text: '123456', user: 'U123' }; // 確認コード
+                default:
+                    return null;
+            }
+        });
+        const mockCaptureAuth = vi.fn().mockResolvedValue({
+            url: 'https://accounts.anthropic.com/auth?code=xxx',
+            exitCode: 0,
+        });
+        const mockCheckAuth = vi
+            .fn()
+            .mockResolvedValue({ loggedIn: true, email: 'test@example.com' });
+
+        const mockCallTool = vi
+            .fn()
+            .mockResolvedValueOnce({ content: [{ text: 'OK' }] }) // browser_navigate
+            .mockResolvedValueOnce({
+                // browser_snapshot - ログインページ
+                content: [
+                    {
+                        text: 'Sign in to Anthropic\nContinue with Google\nContinue with email',
+                    },
+                ],
+            })
+            .mockResolvedValueOnce({ content: [{ text: 'OK' }] }) // browser_click (email)
+            .mockResolvedValueOnce({ content: [{ text: 'OK' }] }) // browser_fill_form (email)
+            .mockResolvedValueOnce({ content: [{ text: 'OK' }] }) // browser_click (continue)
+            .mockResolvedValueOnce({ content: [{ text: 'OK' }] }) // browser_fill_form (code)
+            .mockResolvedValueOnce({ content: [{ text: 'OK' }] }) // browser_click (continue)
+            .mockResolvedValueOnce({ content: [] }); // browser_close
+        const mockClose = vi.fn().mockResolvedValue(undefined);
+        const mockPlaywrightClient = {
+            callTool: mockCallTool,
+            close: mockClose,
+        };
+        const mockCreatePlaywright = vi
+            .fn()
+            .mockResolvedValue(mockPlaywrightClient);
+
+        const handler = new LoginHandler('C123456', '1234.5678', {
+            postFn: mockPost,
+            waitReplyFn: mockWaitReply,
+            captureAuthLoginUrlFn: mockCaptureAuth,
+            checkAuthStatusFn: mockCheckAuth,
+            createPlaywrightClientFn: mockCreatePlaywright as any,
+            sleepFn: async () => {},
+        });
+
+        const result = await handler.execute();
+        expect(result).toBe(true);
+        // email認証フローのcallTool呼び出し確認
+        expect(mockCallTool).toHaveBeenCalledWith({
+            name: 'browser_fill_form',
+            arguments: {
+                values: [{ ref: 'email', value: 'test@example.com' }],
+            },
+        });
+        expect(mockCallTool).toHaveBeenCalledWith({
+            name: 'browser_fill_form',
+            arguments: { values: [{ ref: 'code', value: '123456' }] },
+        });
+    });
+
+    it('postFn送信失敗時にfalseを返す', async () => {
+        const mockPost = vi.fn().mockResolvedValue(null);
+        const handler = new LoginHandler('C123456', '1234.5678', {
+            postFn: mockPost,
+        });
+
+        const result = await handler.execute();
+        expect(result).toBe(false);
     });
 });

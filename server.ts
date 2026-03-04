@@ -1,4 +1,14 @@
 import 'dotenv/config';
+import { execFile } from 'node:child_process';
+import {
+    existsSync,
+    mkdirSync,
+    readFileSync,
+    unlinkSync,
+    writeFileSync,
+} from 'node:fs';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import express, { type Request, type Response } from 'express';
 import fetch from 'node-fetch';
 import pty from 'node-pty';
@@ -895,6 +905,709 @@ export function isAuthenticationError(output: string): boolean {
     return /Not logged in.*Please run \/login/i.test(cleaned);
 }
 
+/** ユーザーの返信が肯定的かどうかを判定する */
+export function isAffirmativeReply(text: string): boolean {
+    const normalized = text.trim().toLowerCase();
+    return [
+        'はい',
+        'yes',
+        'y',
+        'ok',
+        'おk',
+        'おけ',
+        'いいよ',
+        'うん',
+        'する',
+        '実行',
+    ].some((word) => normalized === word || normalized.startsWith(word));
+}
+
+/**
+ * `claude auth login` を実行して認証URLをキャプチャする
+ * BROWSERを一時スクリプトに差し替えてURLをファイルに保存する
+ */
+export function captureAuthLoginUrl(
+    options: {
+        spawnFn?: typeof pty.spawn;
+        urlFilePath?: string;
+        timeoutMs?: number;
+    } = {},
+): Promise<{ url: string | null; exitCode: number }> {
+    const {
+        spawnFn = pty.spawn,
+        urlFilePath = `/tmp/finegate-auth-url-${process.pid}.txt`,
+        timeoutMs = 30_000,
+    } = options;
+
+    return new Promise((resolve) => {
+        // BROWSER env を一時スクリプトに差し替え、URLをファイルに保存する
+        const captureScript = `/tmp/finegate-capture-browser-${process.pid}.sh`;
+        writeFileSync(
+            captureScript,
+            `#!/bin/bash\necho "$1" > "${urlFilePath}"\n`,
+            { mode: 0o755 },
+        );
+
+        // claude auth login 起動（PTYでTTY必要）
+        const childEnv = { ...process.env };
+        delete childEnv.CLAUDECODE;
+        delete childEnv.CLAUDE_CODE_SSE_PORT;
+        delete childEnv.CLAUDE_CODE_ENTRYPOINT;
+        childEnv.BROWSER = captureScript;
+
+        const proc = spawnFn('/bin/zsh', ['-c', 'claude auth login'], {
+            name: 'xterm-256color',
+            cols: 120,
+            rows: 30,
+            cwd: process.cwd(),
+            env: childEnv,
+        });
+
+        let output = '';
+        let resolved = false;
+
+        const timeout = setTimeout(() => {
+            if (!resolved) {
+                resolved = true;
+                proc.kill();
+                // タイムアウトでもURLファイルがあれば読み取る
+                const url = readUrlFile(urlFilePath);
+                cleanup(captureScript, urlFilePath);
+                resolve({ url, exitCode: -1 });
+            }
+        }, timeoutMs);
+
+        proc.onData((data: string) => {
+            output += data;
+            // 出力からもURLを探す（バックアップ）
+            const match = output.match(
+                /https:\/\/(?:console\.anthropic\.com|accounts\.anthropic\.com|claude\.ai)[^\s"')]+/,
+            );
+            if (match && !resolved) {
+                // URLを発見したが、プロセスはコールバック待ちのため終了させない
+                // ファイルにも書き込む（captureScriptがまだ動いていない可能性）
+                try {
+                    if (!existsSync(urlFilePath)) {
+                        writeFileSync(urlFilePath, match[0]);
+                    }
+                } catch {
+                    /* ignore */
+                }
+            }
+        });
+
+        proc.onExit(({ exitCode }: { exitCode: number }) => {
+            clearTimeout(timeout);
+            if (!resolved) {
+                resolved = true;
+                const url =
+                    readUrlFile(urlFilePath) || extractUrlFromOutput(output);
+                cleanup(captureScript, urlFilePath);
+                resolve({ url, exitCode });
+            }
+        });
+    });
+}
+
+function readUrlFile(filePath: string): string | null {
+    try {
+        if (existsSync(filePath)) {
+            const content = readFileSync(filePath, 'utf-8').trim();
+            return content || null;
+        }
+    } catch {
+        /* ignore */
+    }
+    return null;
+}
+
+function extractUrlFromOutput(output: string): string | null {
+    const match = output.match(
+        /https:\/\/(?:console\.anthropic\.com|accounts\.anthropic\.com|claude\.ai)[^\s"')]+/,
+    );
+    return match ? match[0] : null;
+}
+
+function cleanup(...files: string[]): void {
+    for (const f of files) {
+        try {
+            unlinkSync(f);
+        } catch {
+            /* ignore */
+        }
+    }
+}
+
+/**
+ * `claude auth status` を実行して認証状態を確認する
+ */
+export function checkAuthStatus(
+    execFn: typeof execFile = execFile,
+): Promise<{ loggedIn: boolean; email?: string }> {
+    return new Promise((resolve) => {
+        execFn('claude', ['auth', 'status'], (error, stdout) => {
+            if (error) {
+                resolve({ loggedIn: false });
+                return;
+            }
+            try {
+                const status = JSON.parse(stdout);
+                resolve({
+                    loggedIn: !!status.loggedIn,
+                    email: status.email,
+                });
+            } catch {
+                resolve({ loggedIn: false });
+            }
+        });
+    });
+}
+
+/** Playwright MCPのユーザーデータディレクトリ */
+const PLAYWRIGHT_USER_DATA_DIR = '/tmp/finegate-playwright-data';
+
+/**
+ * Playwright MCPクライアントを起動して接続する
+ */
+export async function createPlaywrightClient(
+    options: { headless?: boolean; userDataDir?: string } = {},
+): Promise<Client> {
+    const { headless = false, userDataDir = PLAYWRIGHT_USER_DATA_DIR } =
+        options;
+
+    if (!existsSync(userDataDir)) {
+        mkdirSync(userDataDir, { recursive: true });
+    }
+
+    const args = [
+        '@playwright/mcp',
+        '--browser',
+        'chrome',
+        '--user-data-dir',
+        userDataDir,
+    ];
+    if (headless) {
+        args.push('--headless');
+    }
+
+    const transport = new StdioClientTransport({
+        command: 'npx',
+        args,
+    });
+
+    const client = new Client({
+        name: 'finegate-login',
+        version: '1.0.0',
+    });
+
+    await client.connect(transport);
+    return client;
+}
+
+export interface LoginHandlerOptions {
+    postFn?: PostFn;
+    waitReplyFn?: typeof waitForSlackReply;
+    timeoutMs?: number;
+    captureAuthLoginUrlFn?: typeof captureAuthLoginUrl;
+    checkAuthStatusFn?: typeof checkAuthStatus;
+    createPlaywrightClientFn?: typeof createPlaywrightClient;
+    sleepFn?: (ms: number) => Promise<void>;
+}
+
+/**
+ * 認証エラー時のログインフローを処理する
+ * 1. Slackでユーザーに/login実行の確認を取る
+ * 2. claude auth loginを実行してURLをキャプチャ
+ * 3. Playwright MCPでブラウザを操作して認証を完了
+ * 4. 認証成功時にtrueを返す
+ */
+export class LoginHandler {
+    channel: string;
+    threadTs: string;
+    private _post: PostFn;
+    private _waitReply: typeof waitForSlackReply;
+    private _captureAuthLoginUrl: typeof captureAuthLoginUrl;
+    private _checkAuthStatus: typeof checkAuthStatus;
+    private _createPlaywrightClient: typeof createPlaywrightClient;
+    private _sleep: (ms: number) => Promise<void>;
+    timeoutMs: number;
+
+    constructor(
+        channel: string,
+        threadTs: string,
+        options: LoginHandlerOptions = {},
+    ) {
+        this.channel = channel;
+        this.threadTs = threadTs;
+        this._post = options.postFn || postToSlack;
+        this._waitReply = options.waitReplyFn || waitForSlackReply;
+        this._captureAuthLoginUrl =
+            options.captureAuthLoginUrlFn || captureAuthLoginUrl;
+        this._checkAuthStatus = options.checkAuthStatusFn || checkAuthStatus;
+        this._createPlaywrightClient =
+            options.createPlaywrightClientFn || createPlaywrightClient;
+        this._sleep =
+            options.sleepFn || ((ms) => new Promise((r) => setTimeout(r, ms)));
+        this.timeoutMs = options.timeoutMs || 180_000; // 3分
+    }
+
+    /**
+     * ログインフロー全体を実行する
+     */
+    async execute(): Promise<boolean> {
+        const mention = formatMention();
+
+        // 1. ユーザーに確認
+        const askTs = await this._post(
+            this.channel,
+            `${mention}🔐 *Claude Codeが未認証状態です*\n\`/login\` を実行しますか？（はい / いいえ）`,
+            this.threadTs,
+        );
+        if (!askTs) return false;
+
+        console.log(`${timestamp()} 🔐 Slackでログイン確認を待機中...`);
+        const reply = await this._waitReply(
+            this.channel,
+            this.threadTs,
+            askTs,
+            { timeoutMs: 300_000 }, // 5分
+        );
+
+        if (!reply || !isAffirmativeReply(reply.text)) {
+            await this._post(
+                this.channel,
+                '🔐 ログインをスキップしました。',
+                this.threadTs,
+            );
+            return false;
+        }
+
+        await this._post(
+            this.channel,
+            '🔐 ログイン処理を開始します...',
+            this.threadTs,
+        );
+
+        // 2. claude auth login を起動（バックグラウンドでコールバック待ち）
+        // captureAuthLoginUrl は URL取得後もプロセスが生きている（コールバック待ち）
+        // タイムアウトを長くしてブラウザ操作の時間を確保
+        const authPromise = this._captureAuthLoginUrl({
+            timeoutMs: this.timeoutMs,
+        });
+
+        // URLファイルが作られるまで少し待つ
+        await this._sleep(3_000);
+
+        // URLファイルを直接読む（プロセス終了前でもURLが取得できる）
+        const urlFilePath = `/tmp/finegate-auth-url-${process.pid}.txt`;
+        let authUrl = readUrlFile(urlFilePath);
+
+        if (!authUrl) {
+            // もう少し待ってからリトライ
+            await this._sleep(5_000);
+            authUrl = readUrlFile(urlFilePath);
+        }
+
+        if (!authUrl) {
+            // authPromise が終了していればそこからURLを取得
+            const result = await authPromise;
+            authUrl = result.url;
+        }
+
+        if (!authUrl) {
+            await this._post(
+                this.channel,
+                '❌ 認証URLの取得に失敗しました。サーバー上で手動で `claude auth login` を実行してください。',
+                this.threadTs,
+            );
+            return false;
+        }
+
+        console.log(
+            `${timestamp()} 🔐 認証URL取得: ${authUrl.substring(0, 80)}...`,
+        );
+
+        // 3. Playwright MCP でブラウザ操作
+        let playwrightClient: Client | null = null;
+        try {
+            playwrightClient = await this._createPlaywrightClient();
+
+            // ブラウザでAuth URLに遷移
+            await playwrightClient.callTool({
+                name: 'browser_navigate',
+                arguments: { url: authUrl },
+            });
+
+            await this._post(
+                this.channel,
+                '🌐 ブラウザでAnthropicの認証ページを開きました...',
+                this.threadTs,
+            );
+
+            // ページ読み込み待ち
+            await this._sleep(5_000);
+
+            // ページのスナップショットを取得して状態を判定
+            const snapshot = await playwrightClient.callTool({
+                name: 'browser_snapshot',
+                arguments: {},
+            });
+            const pageContent =
+                (snapshot.content as Array<{ text?: string }>)?.[0]?.text || '';
+
+            // 自動ログイン（リフレッシュトークンで完了）の判定
+            if (this._isLoginComplete(pageContent)) {
+                console.log(
+                    `${timestamp()} 🔐 リフレッシュトークンで自動ログイン完了`,
+                );
+                await this._post(
+                    this.channel,
+                    '✅ リフレッシュトークンで自動ログインが完了しました！',
+                    this.threadTs,
+                );
+
+                // auth loginプロセスの完了を待つ
+                await authPromise;
+                return await this._verifyAuth();
+            }
+
+            // 手動ログインが必要
+            await this._post(
+                this.channel,
+                '🔐 *ログインページが表示されました*\n認証方法を選んでください:\n• `google` → Google認証\n• `email` → メール認証',
+                this.threadTs,
+            );
+
+            const methodTs = await this._post(
+                this.channel,
+                '_2分以内に返信してください_',
+                this.threadTs,
+            );
+            if (!methodTs) return false;
+
+            const methodReply = await this._waitReply(
+                this.channel,
+                this.threadTs,
+                methodTs,
+                { timeoutMs: 120_000 },
+            );
+
+            if (!methodReply) {
+                await this._post(
+                    this.channel,
+                    '❌ タイムアウトしました。サーバー上で手動で `claude auth login` を実行してください。',
+                    this.threadTs,
+                );
+                return false;
+            }
+
+            const method = methodReply.text.trim().toLowerCase();
+            let loginSuccess = false;
+
+            if (method.includes('google')) {
+                loginSuccess = await this._handleGoogleLogin(
+                    playwrightClient,
+                    pageContent,
+                );
+            } else {
+                loginSuccess = await this._handleEmailLogin(
+                    playwrightClient,
+                    pageContent,
+                );
+            }
+
+            if (loginSuccess) {
+                // コールバック完了を待つ
+                await this._sleep(5_000);
+                await authPromise;
+                return await this._verifyAuth();
+            }
+
+            return false;
+        } catch (error) {
+            console.error(`${timestamp()} 🔐 Playwrightログインエラー:`, error);
+            await this._post(
+                this.channel,
+                `❌ ブラウザ操作でエラーが発生しました: ${(error as Error).message}\nサーバー上で手動で \`claude auth login\` を実行してください。`,
+                this.threadTs,
+            );
+            return false;
+        } finally {
+            if (playwrightClient) {
+                try {
+                    await playwrightClient.callTool({
+                        name: 'browser_close',
+                        arguments: {},
+                    });
+                } catch {
+                    /* ignore */
+                }
+                try {
+                    await playwrightClient.close();
+                } catch {
+                    /* ignore */
+                }
+            }
+        }
+    }
+
+    /** ページのスナップショットからログイン完了を判定 */
+    private _isLoginComplete(pageContent: string): boolean {
+        // ログインページのキーワードが存在しない = リダイレクト済み
+        const loginPageKeywords = [
+            'sign in',
+            'log in',
+            'ログイン',
+            'email',
+            'password',
+            'google',
+            'continue with',
+        ];
+        const hasLoginKeyword = loginPageKeywords.some((kw) =>
+            pageContent.toLowerCase().includes(kw),
+        );
+        // ログインキーワードがない場合、認証済み（コールバックにリダイレクトされた）
+        return !hasLoginKeyword;
+    }
+
+    /** Google認証フローをPlaywrightで処理 */
+    private async _handleGoogleLogin(
+        client: Client,
+        _pageContent: string,
+    ): Promise<boolean> {
+        try {
+            // Googleボタンをクリック
+            await client.callTool({
+                name: 'browser_click',
+                arguments: { element: 'Continue with Google' },
+            });
+
+            await this._sleep(3_000);
+
+            // Googleのログインページ
+            // メールアドレスを聞く
+            const emailTs = await this._post(
+                this.channel,
+                '🔐 Googleのログインページが開きました。\nGoogleアカウントのメールアドレスを入力してください:',
+                this.threadTs,
+            );
+            if (!emailTs) return false;
+
+            const emailReply = await this._waitReply(
+                this.channel,
+                this.threadTs,
+                emailTs,
+                { timeoutMs: 120_000 },
+            );
+            if (!emailReply) return false;
+
+            await client.callTool({
+                name: 'browser_fill_form',
+                arguments: {
+                    values: [{ ref: 'email', value: emailReply.text.trim() }],
+                },
+            });
+
+            // 次へボタン
+            await client.callTool({
+                name: 'browser_click',
+                arguments: { element: 'Next' },
+            });
+
+            await this._sleep(3_000);
+
+            // パスワード
+            const pwTs = await this._post(
+                this.channel,
+                '🔐 パスワードを入力してください:',
+                this.threadTs,
+            );
+            if (!pwTs) return false;
+
+            const pwReply = await this._waitReply(
+                this.channel,
+                this.threadTs,
+                pwTs,
+                { timeoutMs: 120_000 },
+            );
+            if (!pwReply) return false;
+
+            await client.callTool({
+                name: 'browser_fill_form',
+                arguments: {
+                    values: [{ ref: 'password', value: pwReply.text.trim() }],
+                },
+            });
+
+            await client.callTool({
+                name: 'browser_click',
+                arguments: { element: 'Next' },
+            });
+
+            // 2FAが必要な場合はスナップショットで確認
+            await this._sleep(5_000);
+            const snapshot = await client.callTool({
+                name: 'browser_snapshot',
+                arguments: {},
+            });
+            const content =
+                (snapshot.content as Array<{ text?: string }>)?.[0]?.text || '';
+
+            if (
+                content.toLowerCase().includes('2-step') ||
+                content.toLowerCase().includes('verification')
+            ) {
+                const codeTs = await this._post(
+                    this.channel,
+                    '🔐 2段階認証のコードを入力してください:',
+                    this.threadTs,
+                );
+                if (!codeTs) return false;
+
+                const codeReply = await this._waitReply(
+                    this.channel,
+                    this.threadTs,
+                    codeTs,
+                    { timeoutMs: 120_000 },
+                );
+                if (!codeReply) return false;
+
+                await client.callTool({
+                    name: 'browser_fill_form',
+                    arguments: {
+                        values: [{ ref: 'code', value: codeReply.text.trim() }],
+                    },
+                });
+
+                await client.callTool({
+                    name: 'browser_click',
+                    arguments: { element: 'Next' },
+                });
+
+                await this._sleep(5_000);
+            }
+
+            return true;
+        } catch (error) {
+            console.error(`${timestamp()} 🔐 Google認証エラー:`, error);
+            await this._post(
+                this.channel,
+                `⚠️ Google認証中にエラーが発生しました: ${(error as Error).message}`,
+                this.threadTs,
+            );
+            return false;
+        }
+    }
+
+    /** メール認証フローをPlaywrightで処理 */
+    private async _handleEmailLogin(
+        client: Client,
+        pageContent: string,
+    ): Promise<boolean> {
+        try {
+            // メールボタンをクリック（ページにある場合）
+            if (pageContent.toLowerCase().includes('email')) {
+                try {
+                    await client.callTool({
+                        name: 'browser_click',
+                        arguments: { element: 'Continue with email' },
+                    });
+                    await this._sleep(2_000);
+                } catch {
+                    /* ボタンがない場合はすでにメール入力画面 */
+                }
+            }
+
+            // メールアドレスを聞く
+            const emailTs = await this._post(
+                this.channel,
+                '🔐 メールアドレスを入力してください:',
+                this.threadTs,
+            );
+            if (!emailTs) return false;
+
+            const emailReply = await this._waitReply(
+                this.channel,
+                this.threadTs,
+                emailTs,
+                { timeoutMs: 120_000 },
+            );
+            if (!emailReply) return false;
+
+            await client.callTool({
+                name: 'browser_fill_form',
+                arguments: {
+                    values: [{ ref: 'email', value: emailReply.text.trim() }],
+                },
+            });
+
+            // 送信ボタン
+            await client.callTool({
+                name: 'browser_click',
+                arguments: { element: 'Continue' },
+            });
+
+            await this._sleep(3_000);
+
+            // 確認コード入力（メール認証はOTPが一般的）
+            const codeTs = await this._post(
+                this.channel,
+                '🔐 メールに送信された確認コードを入力してください:',
+                this.threadTs,
+            );
+            if (!codeTs) return false;
+
+            const codeReply = await this._waitReply(
+                this.channel,
+                this.threadTs,
+                codeTs,
+                { timeoutMs: 300_000 }, // 5分（メール確認に時間がかかる）
+            );
+            if (!codeReply) return false;
+
+            await client.callTool({
+                name: 'browser_fill_form',
+                arguments: {
+                    values: [{ ref: 'code', value: codeReply.text.trim() }],
+                },
+            });
+
+            await client.callTool({
+                name: 'browser_click',
+                arguments: { element: 'Continue' },
+            });
+
+            await this._sleep(5_000);
+            return true;
+        } catch (error) {
+            console.error(`${timestamp()} 🔐 メール認証エラー:`, error);
+            await this._post(
+                this.channel,
+                `⚠️ メール認証中にエラーが発生しました: ${(error as Error).message}`,
+                this.threadTs,
+            );
+            return false;
+        }
+    }
+
+    /** 認証状態を最終確認 */
+    private async _verifyAuth(): Promise<boolean> {
+        const status = await this._checkAuthStatus();
+        if (status.loggedIn) {
+            console.log(
+                `${timestamp()} ✅ 認証確認完了: ${status.email || 'unknown'}`,
+            );
+            return true;
+        }
+        await this._post(
+            this.channel,
+            '❌ ログインに失敗しました。サーバー上で手動で `claude auth login` を実行してください。',
+            this.threadTs,
+        );
+        return false;
+    }
+}
+
 /**
  * エージェントタスクのパラメータ
  */
@@ -995,17 +1708,32 @@ export async function startAgentTask(params: AgentTaskParams): Promise<void> {
         // 正常終了ならループ終了
         if (exitCode === 0) break;
 
-        // 認証エラーの場合はリトライせず即座にSlackで通知して終了
+        // 認証エラーの場合: Slackで確認してPlaywright MCPでログイン試行
         if (isAuthenticationError(output)) {
-            const mention = formatMention();
             console.error(
-                `${timestamp()} 🔐 Claude Codeが未認証状態です。/login を実行してください。`,
+                `${timestamp()} 🔐 Claude Codeが未認証状態です。ログインフローを開始します。`,
             );
-            await postToSlack(
-                channelId,
-                `${mention}🔐 *Claude Codeが未認証状態です*\nサーバー上で \`claude /login\` を実行して認証してください。\n認証完了後、再度タスクを実行できます。`,
-                parentTs,
-            );
+
+            if (!parentTs) break;
+
+            const loginHandler = new LoginHandler(channelId, parentTs);
+            const loginSuccess = await loginHandler.execute();
+
+            if (loginSuccess) {
+                // ログイン成功: このリトライをカウントせずに再実行
+                attempt--;
+                console.log(
+                    `${timestamp()} 🔐 ログイン成功。タスクを再実行します。`,
+                );
+                await postToSlack(
+                    channelId,
+                    '🔐 ログインに成功しました。タスクを再実行します。',
+                    parentTs,
+                );
+                continue;
+            }
+
+            // ログイン失敗または拒否: 終了
             break;
         }
 
