@@ -8,6 +8,7 @@ import {
     FollowUpHandler,
     getRepoConfig,
     InteractiveHandler,
+    isAuthenticationError,
     type ModalValues,
     openModal,
     ProgressTracker,
@@ -1308,6 +1309,36 @@ describe('extractErrorSummary', () => {
 
         const summary = extractErrorSummary(output);
         expect(summary).toContain('Error: something went wrong');
+    });
+});
+
+describe('isAuthenticationError', () => {
+    it('「Not logged in · Please run /login」を認証エラーとして検出する', () => {
+        const output = 'Not logged in · Please run /login';
+        expect(isAuthenticationError(output)).toBe(true);
+    });
+
+    it('ANSIエスケープシーケンス付きの認証エラーを検出する', () => {
+        const output = '\x1b[31mNot logged in · Please run /login\x1b[0m';
+        expect(isAuthenticationError(output)).toBe(true);
+    });
+
+    it('stream-json出力に含まれる認証エラーを検出する', () => {
+        const output = [
+            'some init output',
+            '💬 Claude: Not logged in · Please run /login',
+            '✅ 完了',
+        ].join('\n');
+        expect(isAuthenticationError(output)).toBe(true);
+    });
+
+    it('通常のエラー出力では認証エラーとして検出しない', () => {
+        const output = 'Error: Directory /foo does not exist.';
+        expect(isAuthenticationError(output)).toBe(false);
+    });
+
+    it('空の出力では認証エラーとして検出しない', () => {
+        expect(isAuthenticationError('')).toBe(false);
     });
 });
 

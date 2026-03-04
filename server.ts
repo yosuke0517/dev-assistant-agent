@@ -889,6 +889,12 @@ export function extractErrorSummary(output: string): string {
     return '原因不明のエラーで終了しました（ログを確認してください）';
 }
 
+/** Claude Codeの認証エラーかどうかを判定する */
+export function isAuthenticationError(output: string): boolean {
+    const cleaned = output.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+    return /Not logged in.*Please run \/login/i.test(cleaned);
+}
+
 /**
  * エージェントタスクのパラメータ
  */
@@ -988,6 +994,20 @@ export async function startAgentTask(params: AgentTaskParams): Promise<void> {
 
         // 正常終了ならループ終了
         if (exitCode === 0) break;
+
+        // 認証エラーの場合はリトライせず即座にSlackで通知して終了
+        if (isAuthenticationError(output)) {
+            const mention = formatMention();
+            console.error(
+                `${timestamp()} 🔐 Claude Codeが未認証状態です。/login を実行してください。`,
+            );
+            await postToSlack(
+                channelId,
+                `${mention}🔐 *Claude Codeが未認証状態です*\nサーバー上で \`claude /login\` を実行して認証してください。\n認証完了後、再度タスクを実行できます。`,
+                parentTs,
+            );
+            break;
+        }
 
         // 最大リトライ回数に達した場合はループ終了
         if (attempt >= MAX_RETRIES) {
