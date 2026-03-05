@@ -271,9 +271,7 @@ describe('stealth-run.sh', () => {
         const fs = await import('node:fs');
         const content = fs.readFileSync(scriptPath, 'utf8');
         // ブランチ未指定時の自動検出ロジック
-        expect(content).toContain(
-            'No existing feature branch found for issue',
-        );
+        expect(content).toContain('No existing feature branch found for issue');
         expect(content).toContain('Work branch (auto-detected)');
         // WORK_BRANCH 変数が使用されている
         expect(content).toContain('WORK_BRANCH=');
@@ -283,9 +281,7 @@ describe('stealth-run.sh', () => {
         const fs = await import('node:fs');
         const content = fs.readFileSync(scriptPath, 'utf8');
         expect(content).toContain('USER_REQUEST_NEW_ISSUE=true');
-        expect(content).toContain(
-            'Will create a new branch with user request',
-        );
+        expect(content).toContain('Will create a new branch with user request');
     });
 
     it('USER_REQUEST新規課題モードのプロンプトが含まれる（GitHub）', async () => {

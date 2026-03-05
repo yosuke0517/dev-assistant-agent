@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
     buildDoModalView,
+    type createPlaywrightClient,
     extractErrorSummary,
     extractLastPrUrl,
     extractRelatedRepos,
@@ -2115,7 +2116,8 @@ describe('LoginHandler', () => {
             waitReplyFn: mockWaitReply,
             captureAuthLoginUrlFn: mockCaptureAuth,
             checkAuthStatusFn: mockCheckAuth,
-            createPlaywrightClientFn: mockCreatePlaywright as any,
+            createPlaywrightClientFn:
+                mockCreatePlaywright as unknown as typeof createPlaywrightClient,
             sleepFn: async () => {},
         });
 
@@ -2146,7 +2148,8 @@ describe('LoginHandler', () => {
             postFn: mockPost,
             waitReplyFn: mockWaitReply,
             captureAuthLoginUrlFn: mockCaptureAuth,
-            createPlaywrightClientFn: mockCreatePlaywright as any,
+            createPlaywrightClientFn:
+                mockCreatePlaywright as unknown as typeof createPlaywrightClient,
             sleepFn: async () => {},
         });
 
@@ -2211,7 +2214,8 @@ describe('LoginHandler', () => {
             waitReplyFn: mockWaitReply,
             captureAuthLoginUrlFn: mockCaptureAuth,
             checkAuthStatusFn: mockCheckAuth,
-            createPlaywrightClientFn: mockCreatePlaywright as any,
+            createPlaywrightClientFn:
+                mockCreatePlaywright as unknown as typeof createPlaywrightClient,
             sleepFn: async () => {},
         });
 
