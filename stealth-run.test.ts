@@ -272,11 +272,63 @@ describe('stealth-run.sh', () => {
         const content = fs.readFileSync(scriptPath, 'utf8');
         // ブランチ未指定時の自動検出ロジック
         expect(content).toContain(
-            'Could not find existing feature branch for issue',
+            'No existing feature branch found for issue',
         );
         expect(content).toContain('Work branch (auto-detected)');
         // WORK_BRANCH 変数が使用されている
         expect(content).toContain('WORK_BRANCH=');
+    });
+
+    it('USER_REQUESTモードで既存ブランチが見つからない場合にUSER_REQUEST_NEW_ISSUEフラグが設定される', async () => {
+        const fs = await import('node:fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        expect(content).toContain('USER_REQUEST_NEW_ISSUE=true');
+        expect(content).toContain(
+            'Will create a new branch with user request',
+        );
+    });
+
+    it('USER_REQUEST新規課題モードのプロンプトが含まれる（GitHub）', async () => {
+        const fs = await import('node:fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        expect(content).toContain(
+            'Claude Code starting new issue with user request for GitHub Issue',
+        );
+        expect(content).toContain('ユーザーからの補足指示');
+        expect(content).toContain(
+            'Issue内容とユーザーからの補足指示に基づいてコードを実装',
+        );
+    });
+
+    it('USER_REQUEST新規課題モードのプロンプトが含まれる（Backlog）', async () => {
+        const fs = await import('node:fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        expect(content).toContain(
+            'Claude Code starting new issue with user request for Backlog Issue',
+        );
+        expect(content).toContain(
+            '課題内容とユーザーからの補足指示に基づいてコードを実装',
+        );
+    });
+
+    it('USER_REQUEST新規課題モードではPR作成の指示が含まれる', async () => {
+        const fs = await import('node:fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        // USER_REQUEST_NEW_ISSUE条件とそのプロンプト内にPR作成指示がある
+        const newIssueSection = content.indexOf(
+            'USER_REQUEST_NEW_ISSUE" = "true"',
+        );
+        expect(newIssueSection).toBeGreaterThan(-1);
+        // 新規課題モードのプロンプトにはPR作成指示がある（既存ブランチモードの「新しいPRは作成しないでください」とは異なる）
+        const afterNewIssue = content.substring(newIssueSection);
+        const nextElif = afterNewIssue.indexOf(
+            'elif [ -n "$USER_REQUEST" ]; then',
+        );
+        const newIssuePromptSection = afterNewIssue.substring(0, nextElif);
+        expect(newIssuePromptSection).toContain('PRを作成してください');
+        expect(newIssuePromptSection).not.toContain(
+            '新しいPRは作成しないでください',
+        );
     });
 
     it('USER_REQUESTモードのプロンプトで WORK_BRANCH が使用される', async () => {
