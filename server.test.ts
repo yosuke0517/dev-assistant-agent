@@ -1694,6 +1694,26 @@ describe('buildDoModalView', () => {
         expect(repoBlock.element.options).toHaveLength(6);
     });
 
+    it('repositoryブロックがmulti_static_selectタイプである', () => {
+        const view = buildDoModalView('C123456');
+        const blocks = view.blocks as Array<{
+            block_id: string;
+            element: { type: string };
+        }>;
+        const repoBlock = blocks[0];
+        expect(repoBlock.element.type).toBe('multi_static_select');
+    });
+
+    it('repositoryブロックのラベルに複数選択可の文言が含まれる', () => {
+        const view = buildDoModalView('C123456');
+        const blocks = view.blocks as Array<{
+            block_id: string;
+            label: { text: string };
+        }>;
+        const repoBlock = blocks[0];
+        expect(repoBlock.label.text).toContain('複数選択可');
+    });
+
     it('base_branchとfix_descriptionはoptionalフラグを持つ', () => {
         const view = buildDoModalView('C123456');
         const blocks = view.blocks as Array<{
@@ -1795,12 +1815,15 @@ describe('openModal', () => {
 });
 
 describe('parseModalValues', () => {
-    it('全フィールドが入力された場合に正しくパースする', () => {
+    it('multi_static_selectで複数リポジトリが選択された場合に正しくパースする', () => {
         const stateValues = {
             repository: {
                 value: {
-                    type: 'static_select',
-                    selected_option: { value: 'circus_backend' },
+                    type: 'multi_static_select',
+                    selected_options: [
+                        { value: 'circus_backend' },
+                        { value: 'circus_frontend' },
+                    ],
                 },
             },
             branch: {
@@ -1823,7 +1846,7 @@ describe('parseModalValues', () => {
         const result: ModalValues = parseModalValues(stateValues);
 
         expect(result).toEqual({
-            folder: 'circus_backend',
+            folders: ['circus_backend', 'circus_frontend'],
             branchName: 'feat/RA_DEV-85',
             issueId: 'RA_DEV-85',
             baseBranch: 'develop',
@@ -1831,12 +1854,12 @@ describe('parseModalValues', () => {
         });
     });
 
-    it('オプションフィールドが空の場合はundefinedになる', () => {
+    it('単一リポジトリ選択の場合も配列で返す', () => {
         const stateValues = {
             repository: {
                 value: {
-                    type: 'static_select',
-                    selected_option: { value: 'agent' },
+                    type: 'multi_static_select',
+                    selected_options: [{ value: 'agent' }],
                 },
             },
             branch: {
@@ -1856,7 +1879,7 @@ describe('parseModalValues', () => {
         const result: ModalValues = parseModalValues(stateValues);
 
         expect(result).toEqual({
-            folder: 'agent',
+            folders: ['agent'],
             branchName: 'feat/issue-42',
             issueId: '42',
             baseBranch: undefined,
@@ -1868,7 +1891,7 @@ describe('parseModalValues', () => {
         const result: ModalValues = parseModalValues({});
 
         expect(result).toEqual({
-            folder: '',
+            folders: [],
             branchName: '',
             issueId: '',
             baseBranch: undefined,
@@ -1876,12 +1899,12 @@ describe('parseModalValues', () => {
         });
     });
 
-    it('selected_optionがnullの場合は空文字を返す', () => {
+    it('selected_optionsがnullの場合は空配列を返す', () => {
         const stateValues = {
             repository: {
                 value: {
-                    type: 'static_select',
-                    selected_option: null,
+                    type: 'multi_static_select',
+                    selected_options: null,
                 },
             },
             branch: {
@@ -1899,7 +1922,41 @@ describe('parseModalValues', () => {
         };
 
         const result: ModalValues = parseModalValues(stateValues);
-        expect(result.folder).toBe('');
+        expect(result.folders).toEqual([]);
+    });
+
+    it('3つ以上のリポジトリを選択できる', () => {
+        const stateValues = {
+            repository: {
+                value: {
+                    type: 'multi_static_select',
+                    selected_options: [
+                        { value: 'circus_backend' },
+                        { value: 'circus_frontend' },
+                        { value: 'circus_agent_ecosystem' },
+                    ],
+                },
+            },
+            branch: {
+                value: { type: 'plain_text_input', value: '' },
+            },
+            pbi: {
+                value: { type: 'plain_text_input', value: 'RA_DEV-100' },
+            },
+            base_branch: {
+                value: { type: 'plain_text_input', value: null },
+            },
+            fix_description: {
+                value: { type: 'plain_text_input', value: null },
+            },
+        };
+
+        const result: ModalValues = parseModalValues(stateValues);
+        expect(result.folders).toEqual([
+            'circus_backend',
+            'circus_frontend',
+            'circus_agent_ecosystem',
+        ]);
     });
 });
 

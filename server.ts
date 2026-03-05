@@ -158,9 +158,12 @@ export function buildDoModalView(channelId: string): Record<string, unknown> {
             {
                 type: 'input',
                 block_id: 'repository',
-                label: { type: 'plain_text', text: 'リポジトリ' },
+                label: {
+                    type: 'plain_text',
+                    text: 'リポジトリ（複数選択可）',
+                },
                 element: {
-                    type: 'static_select',
+                    type: 'multi_static_select',
                     action_id: 'value',
                     placeholder: {
                         type: 'plain_text',
@@ -276,7 +279,7 @@ export async function openModal(
  * Slackモーダルのview_submissionペイロードから入力値を抽出する
  */
 export interface ModalValues {
-    folder: string;
+    folders: string[];
     branchName: string;
     issueId: string;
     baseBranch: string | undefined;
@@ -289,6 +292,7 @@ interface SlackViewStateValues {
             type: string;
             value?: string | null;
             selected_option?: { value: string } | null;
+            selected_options?: { value: string }[] | null;
         };
     };
 }
@@ -296,14 +300,16 @@ interface SlackViewStateValues {
 export function parseModalValues(
     stateValues: SlackViewStateValues,
 ): ModalValues {
-    const repository =
-        stateValues.repository?.value?.selected_option?.value ?? '';
+    // multi_static_select は selected_options を返す
+    const selectedOptions =
+        stateValues.repository?.value?.selected_options ?? [];
+    const folders = selectedOptions.map((opt) => opt.value);
     const branchName = stateValues.branch?.value?.value ?? '';
     const issueId = stateValues.pbi?.value?.value ?? '';
     const baseBranch = stateValues.base_branch?.value?.value || undefined;
     const userRequest = stateValues.fix_description?.value?.value || undefined;
 
-    return { folder: repository, branchName, issueId, baseBranch, userRequest };
+    return { folders, branchName, issueId, baseBranch, userRequest };
 }
 
 function timestamp(): string {
@@ -1644,15 +1650,25 @@ export async function startAgentTask(params: AgentTaskParams): Promise<void> {
         ? `GitHub Issue #${issueId}`
         : issueId;
 
+    // 関連リポジトリの表示名リスト
+    const relatedDisplayNames = relatedRepos.map(
+        (r) => getRepoConfig(r.name).displayName,
+    );
+    const allRepoNames =
+        relatedDisplayNames.length > 0
+            ? `${displayName}, ${relatedDisplayNames.join(', ')}`
+            : displayName;
+
     console.log(
-        `\n${timestamp()} 🚀 実行開始: ${displayName}, ID: ${issueLabel}`,
+        `\n${timestamp()} 🚀 実行開始: ${allRepoNames}, ID: ${issueLabel}`,
     );
 
     // 1. 親メッセージを chat.postMessage で投稿 → ts (スレッドID) 取得
-    const parentTs = await postToSlack(
-        channelId,
-        `🚀 *${displayName}* にて *${issueLabel}* の対応を開始しました。\n進捗はこのスレッドでお知らせします。`,
-    );
+    const startMessage =
+        relatedDisplayNames.length > 0
+            ? `🚀 *${allRepoNames}* にて *${issueLabel}* の対応を開始しました（複数リポジトリ）。\n進捗はこのスレッドでお知らせします。`
+            : `🚀 *${displayName}* にて *${issueLabel}* の対応を開始しました。\n進捗はこのスレッドでお知らせします。`;
+    const parentTs = await postToSlack(channelId, startMessage);
 
     // 2. Slack進捗通知トラッカー（1分ごとにスレッドへ進捗を送信）
     const tracker = new ProgressTracker(channelId, issueId, parentTs);
@@ -1950,7 +1966,7 @@ app.post('/slack/interactions', async (req: Request, res: Response) => {
     const stateValues = payload.view.state?.values;
     if (!stateValues) return;
 
-    const { folder, branchName, issueId, baseBranch, userRequest } =
+    const { folders, branchName, issueId, baseBranch, userRequest } =
         parseModalValues(stateValues);
 
     let channelId: string;
@@ -1962,25 +1978,31 @@ app.post('/slack/interactions', async (req: Request, res: Response) => {
         return;
     }
 
-    if (!channelId || !folder || !issueId) {
+    const primaryFolder = folders[0] ?? '';
+    if (!channelId || !primaryFolder || !issueId) {
         console.error('必須フィールドが不足:', {
             channelId,
-            folder,
+            folder: primaryFolder,
             issueId,
         });
         return;
     }
 
-    const rawCommand = `${folder} ${issueId}${baseBranch ? ` ${baseBranch}` : ''}`;
+    // 2つ目以降のリポジトリは関連リポジトリとして扱う
+    const relatedRepos: RelatedRepo[] = folders.slice(1).map((name) => ({
+        name,
+    }));
+
+    const rawCommand = `${folders.join(', ')} ${issueId}${baseBranch ? ` ${baseBranch}` : ''}`;
 
     // エージェントタスクを非同期で開始
     startAgentTask({
-        folder,
+        folder: primaryFolder,
         issueId,
         baseBranch,
         userRequest,
         branchName: branchName || undefined,
-        relatedRepos: [],
+        relatedRepos,
         channelId,
         rawCommand,
     });

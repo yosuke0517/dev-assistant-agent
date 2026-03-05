@@ -736,6 +736,30 @@ fs.writeFileSync(output, JSON.stringify({ mcpServers }, null, 2));
         );
     });
 
+    it('クロスリポジトリ時に必須承認フローの指示が含まれる', async () => {
+        const fs = await import('node:fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        expect(content).toContain('必須承認フロー');
+        expect(content).toContain(
+            '実装を開始する前に、必ず以下の承認フローを実行してください',
+        );
+        expect(content).toContain(
+            'ask_human MCPツールを使用して、以下の形式でユーザーに確認してください',
+        );
+        expect(content).toContain('承認なしに実装を開始することは禁止です');
+    });
+
+    it('クロスリポジトリの承認フローでリポジトリごとの計画確認が求められる', async () => {
+        const fs = await import('node:fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        expect(content).toContain('プライマリリポジトリ名');
+        expect(content).toContain('関連リポジトリ名');
+        expect(content).toContain('実装内容の概要');
+        expect(content).toContain(
+            'ユーザーの承認を得てから実装を開始してください',
+        );
+    });
+
     it('MCP設定に関連リポジトリのMCPがマージされる', async () => {
         const fs = await import('node:fs');
         const content = fs.readFileSync(scriptPath, 'utf8');
