@@ -55,8 +55,8 @@ describe('stealth-run.sh', () => {
                 TARGET_PATH="$AGENT_PROJECT_PATH"
                 GITHUB_REPO="yosuke0517/dev-assistant-agent"
             elif [ "$FOLDER_NAME" = "jjp" ]; then
-                TARGET_PATH="$WORKSPACE_ROOT/jjp-loadsheet-ui"
-                GITHUB_REPO="Route-sec/jjp-loadsheet-ui"
+                TARGET_PATH="$WORKSPACE_ROOT/jjp-loadsheet"
+                GITHUB_REPO="Route-sec/jjp-loadsheet"
             else
                 TARGET_PATH="$WORKSPACE_ROOT/$FOLDER_NAME"
                 GITHUB_REPO=""
@@ -83,8 +83,8 @@ describe('stealth-run.sh', () => {
                 TARGET_PATH="$AGENT_PROJECT_PATH"
                 GITHUB_REPO="yosuke0517/dev-assistant-agent"
             elif [ "$FOLDER_NAME" = "jjp" ]; then
-                TARGET_PATH="$WORKSPACE_ROOT/jjp-loadsheet-ui"
-                GITHUB_REPO="Route-sec/jjp-loadsheet-ui"
+                TARGET_PATH="$WORKSPACE_ROOT/jjp-loadsheet"
+                GITHUB_REPO="Route-sec/jjp-loadsheet"
             else
                 TARGET_PATH="$WORKSPACE_ROOT/$FOLDER_NAME"
                 GITHUB_REPO=""
@@ -93,13 +93,13 @@ describe('stealth-run.sh', () => {
             echo "repo:$GITHUB_REPO"
         `;
         const result = execSync(checkScript, { encoding: 'utf8' });
-        expect(result).toContain(`path:${workspaceRoot}/jjp-loadsheet-ui`);
-        expect(result).toContain('repo:Route-sec/jjp-loadsheet-ui');
+        expect(result).toContain(`path:${workspaceRoot}/jjp-loadsheet`);
+        expect(result).toContain('repo:Route-sec/jjp-loadsheet');
     });
 
     it('GITHUB_REPOが設定されたリポジトリではGitHub Issuesプロンプトが使用される', () => {
         const checkScript = `
-            GITHUB_REPO="Route-sec/jjp-loadsheet-ui"
+            GITHUB_REPO="Route-sec/jjp-loadsheet"
             if [ -n "$GITHUB_REPO" ]; then
                 echo "github_issues"
             else
@@ -322,7 +322,7 @@ describe('stealth-run.sh', () => {
         expect(content).toContain(
             'GITHUB_REPO="yosuke0517/dev-assistant-agent"',
         );
-        expect(content).toContain('GITHUB_REPO="Route-sec/jjp-loadsheet-ui"');
+        expect(content).toContain('GITHUB_REPO="Route-sec/jjp-loadsheet"');
         expect(content).toContain('GITHUB_REPO=""');
         // GITHUB_REPOによる分岐
         expect(content).toContain('if [ -n "$GITHUB_REPO" ]');
@@ -332,8 +332,8 @@ describe('stealth-run.sh', () => {
         const fs = await import('node:fs');
         const content = fs.readFileSync(scriptPath, 'utf8');
         expect(content).toContain('FOLDER_NAME" = "jjp"');
-        expect(content).toContain('jjp-loadsheet-ui');
-        expect(content).toContain('Route-sec/jjp-loadsheet-ui');
+        expect(content).toContain('jjp-loadsheet');
+        expect(content).toContain('Route-sec/jjp-loadsheet');
     });
 
     it('GitHub Issueプロンプトでリポジトリ名がGITHUB_REPO変数から参照される', async () => {

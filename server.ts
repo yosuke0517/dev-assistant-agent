@@ -39,7 +39,7 @@ export function getRepoConfig(folder: string): RepoConfig {
         case 'agent':
             return { displayName: 'dev-assistant-agent', isGitHub: true };
         case 'jjp':
-            return { displayName: 'jjp-loadsheet-ui', isGitHub: true };
+            return { displayName: 'jjp-loadsheet', isGitHub: true };
         default:
             return { displayName: folder, isGitHub: false };
     }
