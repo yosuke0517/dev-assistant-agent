@@ -36,7 +36,7 @@ if [ "$FOLDER_NAME" = "agent" ]; then
     GITHUB_REPO="yosuke0517/dev-assistant-agent"
 elif [ "$FOLDER_NAME" = "jjp" ]; then
     TARGET_PATH="$JJP_PROJECT_PATH"
-    GITHUB_REPO="Route-sec/jjp-loadsheet-ui"
+    GITHUB_REPO="Route-sec/jjp-loadsheet"
 else
     TARGET_PATH="$WORKSPACE_ROOT/$FOLDER_NAME"
     GITHUB_REPO=""

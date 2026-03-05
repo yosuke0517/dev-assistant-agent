@@ -195,10 +195,10 @@ describe('getRepoConfig', () => {
         });
     });
 
-    it('jjpの場合、jjp-loadsheet-uiを返しisGitHubがtrue', () => {
+    it('jjpの場合、jjp-loadsheetを返しisGitHubがtrue', () => {
         const config = getRepoConfig('jjp');
         expect(config).toEqual({
-            displayName: 'jjp-loadsheet-ui',
+            displayName: 'jjp-loadsheet',
             isGitHub: true,
         });
     });
