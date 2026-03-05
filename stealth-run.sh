@@ -112,10 +112,11 @@ if [ -n "$USER_REQUEST" ]; then
         fi
 
         if [ -z "$WORK_BRANCH" ]; then
-            echo "Error: Could not find existing feature branch for issue ${ISSUE_ID}. Please specify branch explicitly as 3rd argument."
-            exit 1
+            echo "No existing feature branch found for issue ${ISSUE_ID}. Will create a new branch with user request."
+            USER_REQUEST_NEW_ISSUE=true
+        else
+            echo "Work branch (auto-detected): $WORK_BRANCH"
         fi
-        echo "Work branch (auto-detected): $WORK_BRANCH"
     fi
 elif [ -n "$FOLLOW_UP_MESSAGE" ]; then
     if [ -n "$GITHUB_REPO" ]; then
@@ -419,6 +420,118 @@ ${FOLLOW_UP_MESSAGE}
 5. 変更をコミットしてpushしてください（既存のPRに自動反映されます）
 
 【重要】新しいPRは作成しないでください。pushで既存のPRが自動更新されます。
+【重要】絶対に ${BASE_BRANCH} ブランチへ直接 push しないでください。
+
+【重要】ask_human MCPツールは --mcp-config で事前設定済みです。MCPの設定ファイルを調査する必要はありません。直接呼び出してください。
+
+【重要】実装中に以下のケースでは、必ず ask_human MCPツールを使用してSlackで確認してください（※ AskUserQuestion は使用禁止。必ず ask_human を使うこと）:
+- 仕様の解釈が複数通りある場合
+- 課題の記述が曖昧で実装方針が定まらない場合
+- 破壊的な変更（既存APIの変更、DB スキーマ変更等）を行う前
+- 設計判断で迷った場合（例: このロジックはどこに置くべきか）
+勝手に解釈して進めず、必ず確認を取ってから実装してください。"
+    fi
+elif [ -n "$USER_REQUEST" ] && [ "$USER_REQUEST_NEW_ISSUE" = "true" ]; then
+    # ユーザー要望モード（新規課題）: ブランチを新規作成して要望を実装
+    # 既存ブランチが見つからなかった場合、通常の新規課題フローにユーザーの補足指示を追加
+    if [ -n "$GITHUB_REPO" ]; then
+        if [ -n "$BRANCH_NAME" ]; then
+            NEW_ISSUE_BRANCH_INSTRUCTION="ブランチ ${BRANCH_NAME} を作成してください。"
+        else
+            NEW_ISSUE_BRANCH_INSTRUCTION="Issue内容に基づいたブランチを作成してください。フォーマットは feat/issue-${ISSUE_ID} または fix/issue-${ISSUE_ID}（内容に応じて選択）。"
+        fi
+        echo "Claude Code starting new issue with user request for GitHub Issue: #${ISSUE_ID} (${GITHUB_REPO})..."
+        PROMPT="以下のSTEPに従って作業してください。
+
+【ユーザーからの補足指示】
+${USER_REQUEST}
+
+STEP1: GitHub MCPを使用して ${GITHUB_REPO} リポジトリの Issue #${ISSUE_ID} の内容を確認してください。
+${NEW_ISSUE_BRANCH_INSTRUCTION}
+ブランチ作成後、必ずそのブランチに切り替えてください。
+
+STEP2: Issue内容とユーザーからの補足指示に基づいてコードを実装し、テストをパスさせてください。
+適切な粒度でコミットしてください。
+
+STEP3: すべての作業が完了したら、作業ブランチをリモートにpushし、GitHub MCPを使用してPRを作成してください。
+PRのタイトルはIssue内容に基づいて簡潔に記述し、bodyには実施内容のサマリーを記載してください。
+PRは必ずdraft状態で作成してください（--draft フラグを使用）。
+PRのマージ先（ベースブランチ）は ${BASE_BRANCH} を指定してください（--base ${BASE_BRANCH}）。
+
+【PR bodyのフォーマット - 必須】
+PR bodyは以下のMarkdownフォーマットに従い、各セクションの間に必ず空行を入れてください。
+bodyパラメータには文字列としての改行表現（バックスラッシュn等）を使わず、実際の改行文字を含めてください。
+
+## Summary
+
+- 変更内容1
+- 変更内容2
+
+## Test plan
+
+- [ ] テスト項目1
+- [ ] テスト項目2
+
+Closes #<Issue番号>
+
+ただし、課題の指示が以下に該当する場合はPRを作成せず、実施内容のレポートのみ報告してください:
+- 調査・リサーチのみを求める指示の場合（例: 「〜を調べて」「〜の原因を特定して」）
+- GitHub Issueへのコメント追加を求める指示の場合（例: 「調査結果をコメントで追加して」）
+- レポートやドキュメント作成のみを求める指示の場合
+- コード変更を伴わない作業の場合
+
+【重要】絶対に ${BASE_BRANCH} ブランチへ直接 push しないでください。
+
+【重要】ask_human MCPツールは --mcp-config で事前設定済みです。MCPの設定ファイルを調査する必要はありません。直接呼び出してください。
+
+【重要】実装中に以下のケースでは、必ず ask_human MCPツールを使用してSlackで確認してください（※ AskUserQuestion は使用禁止。必ず ask_human を使うこと）:
+- 仕様の解釈が複数通りある場合
+- 課題の記述が曖昧で実装方針が定まらない場合
+- 破壊的な変更（既存APIの変更、DB スキーマ変更等）を行う前
+- 設計判断で迷った場合（例: このロジックはどこに置くべきか）
+勝手に解釈して進めず、必ず確認を取ってから実装してください。"
+    else
+        if [ -n "$BRANCH_NAME" ]; then
+            NEW_ISSUE_BACKLOG_BRANCH_INSTRUCTION="ブランチ ${BRANCH_NAME} を作成してください。ブランチ作成後、必ずそのブランチに切り替えてください。"
+        else
+            NEW_ISSUE_BACKLOG_BRANCH_INSTRUCTION="課題IDに基づいたブランチを作成してください。フォーマットは feat/${ISSUE_ID} 。例: feat/RA_DEV-1234 。ブランチ作成後、必ずそのブランチに切り替えてください。"
+        fi
+        echo "Claude Code starting new issue with user request for Backlog Issue: ${ISSUE_ID}..."
+        PROMPT="以下のSTEPに従って作業してください。
+
+【ユーザーからの補足指示】
+${USER_REQUEST}
+
+STEP1: Backlog MCPを使用して課題 ${ISSUE_ID} の内容を確認し、${NEW_ISSUE_BACKLOG_BRANCH_INSTRUCTION}\
+
+STEP2: 課題内容とユーザーからの補足指示に基づいてコードを実装し、テストをパスさせてください。\
+デザインが必要な場合は、まず figma-desktop MCP を試してアプリからデータを取得し、\
+接続できない場合は figma MCP (HTTP版) を使用して API 経由でデータを読み取ってください。\
+.claude/commands/commit-dry.md を参考に適切な粒度でコミットしてください。
+
+STEP3: すべての作業が完了したら、作業ブランチをリモートにpushし、PRを作成してください。\
+PRのタイトルは課題内容に基づいて簡潔に記述し、bodyには実施内容のサマリーを記載してください。\
+PRは必ずdraft状態で作成してください（--draft フラグを使用）。\
+PRのマージ先（ベースブランチ）は ${BASE_BRANCH} を指定してください（--base ${BASE_BRANCH}）。
+
+【PR bodyのフォーマット - 必須】
+PR bodyは以下のMarkdownフォーマットに従い、各セクションの間に必ず空行を入れてください。
+bodyパラメータには文字列としての改行表現（バックスラッシュn等）を使わず、実際の改行文字を含めてください。
+
+## Summary
+
+- 変更内容1
+- 変更内容2
+
+## Test plan
+
+- [ ] テスト項目1
+- [ ] テスト項目2
+
+ただし、課題の指示が以下に該当する場合はPRを作成せず、実施内容のレポートのみ報告してください:\
+- レポートやドキュメント作成のみを求める指示の場合\
+- Backlogの課題編集やPBI追加など、コード変更を伴わない作業の場合
+
 【重要】絶対に ${BASE_BRANCH} ブランチへ直接 push しないでください。
 
 【重要】ask_human MCPツールは --mcp-config で事前設定済みです。MCPの設定ファイルを調査する必要はありません。直接呼び出してください。
