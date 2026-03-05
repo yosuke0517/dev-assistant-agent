@@ -353,6 +353,20 @@ describe('stealth-run.sh', () => {
         );
     });
 
+    it('PR bodyのフォーマット指示がGitHub用とBacklog用の両方に含まれる', async () => {
+        const fs = await import('node:fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        // GitHub用とBacklog用の両方にフォーマット指示がある
+        const formatMatches = content.match(/PR bodyのフォーマット - 必須/g);
+        expect(formatMatches).not.toBeNull();
+        expect(formatMatches?.length).toBeGreaterThanOrEqual(2);
+        // エスケープシーケンスを使わない旨の指示がある
+        expect(content).toContain('実際の改行文字を含めてください');
+        // テンプレートにSummaryとTest planセクションが含まれる
+        expect(content).toContain('## Summary');
+        expect(content).toContain('## Test plan');
+    });
+
     it('PRは必ずdraft状態で作成する指示が含まれる', async () => {
         const fs = await import('node:fs');
         const content = fs.readFileSync(scriptPath, 'utf8');
