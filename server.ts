@@ -233,6 +233,40 @@ export function buildDoModalView(channelId: string): Record<string, unknown> {
                 },
                 optional: true,
             },
+            {
+                type: 'input',
+                block_id: 'review_mode',
+                label: {
+                    type: 'plain_text',
+                    text: 'PRレビューモード',
+                },
+                element: {
+                    type: 'static_select',
+                    action_id: 'value',
+                    placeholder: {
+                        type: 'plain_text',
+                        text: 'モードを選択',
+                    },
+                    initial_option: {
+                        text: { type: 'plain_text', text: '実装' },
+                        value: 'implement',
+                    },
+                    options: [
+                        {
+                            text: { type: 'plain_text', text: '実装' },
+                            value: 'implement',
+                        },
+                        {
+                            text: {
+                                type: 'plain_text',
+                                text: 'PRレビュー',
+                            },
+                            value: 'review',
+                        },
+                    ],
+                },
+                optional: true,
+            },
         ],
     };
 }
@@ -284,6 +318,7 @@ export interface ModalValues {
     issueId: string;
     baseBranch: string | undefined;
     userRequest: string | undefined;
+    reviewMode: boolean;
 }
 
 interface SlackViewStateValues {
@@ -308,8 +343,18 @@ export function parseModalValues(
     const issueId = stateValues.pbi?.value?.value ?? '';
     const baseBranch = stateValues.base_branch?.value?.value || undefined;
     const userRequest = stateValues.fix_description?.value?.value || undefined;
+    const reviewModeValue =
+        stateValues.review_mode?.value?.selected_option?.value ?? 'implement';
+    const reviewMode = reviewModeValue === 'review';
 
-    return { folders, branchName, issueId, baseBranch, userRequest };
+    return {
+        folders,
+        branchName,
+        issueId,
+        baseBranch,
+        userRequest,
+        reviewMode,
+    };
 }
 
 function timestamp(): string {
@@ -733,6 +778,7 @@ export function spawnWorker(
     userRequest: string | null = null,
     relatedRepos: RelatedRepo[] = [],
     branchName: string | null = null,
+    reviewMode = false,
 ): Promise<SpawnWorkerResult> {
     return new Promise((resolve) => {
         // Claude Code内から起動された場合のネスト検出を回避
@@ -777,6 +823,7 @@ export function spawnWorker(
                         )
                         .join(','),
                 }),
+                ...(reviewMode && { REVIEW_MODE: 'true' }),
             },
         });
 
@@ -1626,6 +1673,7 @@ export interface AgentTaskParams {
     relatedRepos: RelatedRepo[];
     channelId: string;
     rawCommand?: string;
+    reviewMode?: boolean;
 }
 
 /**
@@ -1642,6 +1690,7 @@ export async function startAgentTask(params: AgentTaskParams): Promise<void> {
         relatedRepos,
         channelId,
         rawCommand,
+        reviewMode,
     } = params;
 
     const repoConfig = getRepoConfig(folder);
@@ -1659,15 +1708,18 @@ export async function startAgentTask(params: AgentTaskParams): Promise<void> {
             ? `${displayName}, ${relatedDisplayNames.join(', ')}`
             : displayName;
 
+    const modeLabel = reviewMode ? 'PRレビュー' : '実行';
     console.log(
-        `\n${timestamp()} 🚀 実行開始: ${allRepoNames}, ID: ${issueLabel}`,
+        `\n${timestamp()} 🚀 ${modeLabel}開始: ${allRepoNames}, ID: ${issueLabel}`,
     );
 
     // 1. 親メッセージを chat.postMessage で投稿 → ts (スレッドID) 取得
+    const modeEmoji = reviewMode ? '🔍' : '🚀';
+    const modeText = reviewMode ? 'PRレビュー' : '対応';
     const startMessage =
         relatedDisplayNames.length > 0
-            ? `🚀 *${allRepoNames}* にて *${issueLabel}* の対応を開始しました（複数リポジトリ）。\n進捗はこのスレッドでお知らせします。`
-            : `🚀 *${displayName}* にて *${issueLabel}* の対応を開始しました。\n進捗はこのスレッドでお知らせします。`;
+            ? `${modeEmoji} *${allRepoNames}* にて *${issueLabel}* の${modeText}を開始しました（複数リポジトリ）。\n進捗はこのスレッドでお知らせします。`
+            : `${modeEmoji} *${displayName}* にて *${issueLabel}* の${modeText}を開始しました。\n進捗はこのスレッドでお知らせします。`;
     const parentTs = await postToSlack(channelId, startMessage);
 
     // 2. Slack進捗通知トラッカー（1分ごとにスレッドへ進捗を送信）
@@ -1708,6 +1760,7 @@ export async function startAgentTask(params: AgentTaskParams): Promise<void> {
             userRequest || null,
             relatedRepos,
             branchName || null,
+            reviewMode ?? false,
         );
         lastExitCode = exitCode;
         lastOutput = output;
@@ -1966,8 +2019,14 @@ app.post('/slack/interactions', async (req: Request, res: Response) => {
     const stateValues = payload.view.state?.values;
     if (!stateValues) return;
 
-    const { folders, branchName, issueId, baseBranch, userRequest } =
-        parseModalValues(stateValues);
+    const {
+        folders,
+        branchName,
+        issueId,
+        baseBranch,
+        userRequest,
+        reviewMode,
+    } = parseModalValues(stateValues);
 
     let channelId: string;
     try {
@@ -2005,6 +2064,7 @@ app.post('/slack/interactions', async (req: Request, res: Response) => {
         relatedRepos,
         channelId,
         rawCommand,
+        reviewMode,
     });
 });
 

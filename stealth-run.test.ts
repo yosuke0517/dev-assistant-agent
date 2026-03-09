@@ -345,6 +345,23 @@ describe('stealth-run.sh', () => {
         expect(content).toContain('for prefix in "feat" "fix"');
     });
 
+    it('REVIEW_MODE のプロンプトにレビュー観点が含まれる', async () => {
+        const fs = await import('node:fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        // REVIEW_MODE の条件分岐
+        expect(content).toContain('if [ -n "$REVIEW_MODE" ]');
+        // レビュー観点が含まれる
+        expect(content).toContain('仕様充足性');
+        expect(content).toContain('スコープ逸脱');
+        expect(content).toContain('ロジックバグ');
+        expect(content).toContain('セキュリティ');
+        expect(content).toContain('リファクタリング');
+        // コード修正を行わない指示
+        expect(content).toContain(
+            'コードの修正は行わないでください。レビューと報告のみを行ってください',
+        );
+    });
+
     it('対象ブランチが存在する場合はそのブランチの先端からworktreeを開始する', async () => {
         const fs = await import('node:fs');
         const content = fs.readFileSync(scriptPath, 'utf8');
