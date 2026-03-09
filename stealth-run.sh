@@ -178,8 +178,7 @@ RELATED_MCP_PATHS=""
 
 if [ -n "${RELATED_REPOS:-}" ]; then
     echo "Processing related repositories: $RELATED_REPOS"
-    IFS=',' read -ra REPO_SPECS <<< "$RELATED_REPOS"
-    for repo_spec in "${REPO_SPECS[@]}"; do
+    for repo_spec in $(echo "$RELATED_REPOS" | tr ',' '\n'); do
         REL_REPO_NAME="${repo_spec%%:*}"
         REL_REPO_BRANCH="${repo_spec#*:}"
         if [ "$REL_REPO_BRANCH" = "$REL_REPO_NAME" ]; then

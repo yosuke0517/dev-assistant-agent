@@ -6,7 +6,7 @@
 # 必要な変数: GITHUB_REPO, ISSUE_ID, BASE_BRANCH, USER_REQUEST, WORK_BRANCH, BRANCH_NAME
 # 出力: PROMPT 変数を設定
 
-PROMPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROMPTS_DIR="${PROMPTS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)}"
 source "$PROMPTS_DIR/_common.sh"
 
 if [ "$USER_REQUEST_NEW_ISSUE" = "true" ]; then

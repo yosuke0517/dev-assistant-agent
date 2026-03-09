@@ -1193,6 +1193,52 @@ describe('InteractiveHandler', () => {
         consoleSpy.mockRestore();
     });
 
+    it('userRequest設定時にエラーメッセージに指示内容が含まれる', async () => {
+        const consoleSpy = vi
+            .spyOn(console, 'log')
+            .mockImplementation(() => {});
+        const mockPost = vi.fn().mockResolvedValue('1234.5680');
+        const mockWaitReply = vi
+            .fn()
+            .mockResolvedValue({ text: 'retry', user: 'U123' });
+
+        const handler = new InteractiveHandler('C123456', '1234.5678', {
+            postFn: mockPost,
+            waitReplyFn: mockWaitReply,
+            userRequest: 'バグを修正してください',
+        });
+
+        await handler.askUser('test error');
+
+        const sentText = mockPost.mock.calls[0][1];
+        expect(sentText).toContain('*指示内容:*');
+        expect(sentText).toContain('バグを修正してください');
+
+        consoleSpy.mockRestore();
+    });
+
+    it('userRequest未設定時はエラーメッセージに指示内容が含まれない', async () => {
+        const consoleSpy = vi
+            .spyOn(console, 'log')
+            .mockImplementation(() => {});
+        const mockPost = vi.fn().mockResolvedValue('1234.5680');
+        const mockWaitReply = vi
+            .fn()
+            .mockResolvedValue({ text: 'retry', user: 'U123' });
+
+        const handler = new InteractiveHandler('C123456', '1234.5678', {
+            postFn: mockPost,
+            waitReplyFn: mockWaitReply,
+        });
+
+        await handler.askUser('test error');
+
+        const sentText = mockPost.mock.calls[0][1];
+        expect(sentText).not.toContain('*指示内容:*');
+
+        consoleSpy.mockRestore();
+    });
+
     it('originalCommand未設定時はエラーメッセージに実行コマンドが含まれない', async () => {
         const consoleSpy = vi
             .spyOn(console, 'log')

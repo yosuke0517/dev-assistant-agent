@@ -532,6 +532,7 @@ interface InteractiveHandlerOptions {
     waitReplyFn?: typeof waitForSlackReply;
     timeoutMs?: number;
     originalCommand?: string;
+    userRequest?: string;
 }
 
 interface UserDecision {
@@ -547,6 +548,7 @@ export class InteractiveHandler {
     channel: string | null;
     threadTs: string | null;
     originalCommand: string | undefined;
+    userRequest: string | undefined;
     private _post: PostFn;
     private _waitReply: typeof waitForSlackReply;
     timeoutMs: number;
@@ -559,6 +561,7 @@ export class InteractiveHandler {
         this.channel = channel;
         this.threadTs = threadTs;
         this.originalCommand = options.originalCommand;
+        this.userRequest = options.userRequest;
         this._post = options.postFn || postToSlack;
         this._waitReply = options.waitReplyFn || waitForSlackReply;
         this.timeoutMs = options.timeoutMs || 10_800_000;
@@ -579,12 +582,16 @@ export class InteractiveHandler {
         const commandSection = this.originalCommand
             ? ['', '*実行コマンド:*', `\`/do ${this.originalCommand}\``, '']
             : [''];
+        const userRequestSection = this.userRequest
+            ? ['', '*指示内容:*', this.userRequest, '']
+            : [];
         const question = [
             `${mention}⚠️ *エラーが発生しました*`,
             '```',
             errorSummary.substring(0, 500),
             '```',
             ...commandSection,
+            ...userRequestSection,
             '続行方法を返信してください:',
             '• `retry` または `再実行` → 同じタスクを再実行',
             '• `abort` または `中断` → タスクを中断',
@@ -1707,6 +1714,7 @@ export async function startAgentTask(params: AgentTaskParams): Promise<void> {
     // 3. インタラクティブハンドラー（エラー時にSlackで確認）
     const interactive = new InteractiveHandler(channelId, parentTs, {
         originalCommand: rawCommand || undefined,
+        userRequest: userRequest || undefined,
     });
 
     const MAX_RETRIES = 3;
