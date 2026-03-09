@@ -13,6 +13,12 @@ import express, { type Request, type Response } from 'express';
 import fetch from 'node-fetch';
 import pty from 'node-pty';
 import {
+    buildReviewModeBlock,
+    getReviewModeDisplay,
+    parseReviewMode,
+    type ReviewModeDisplay,
+} from './lib/review-mode.js';
+import {
     type FetchFn,
     formatMention,
     postToSlack,
@@ -23,7 +29,14 @@ import {
 } from './lib/slack.js';
 
 export { formatMention, postToSlack, waitForSlackReply };
-export type { FetchFn, RetryOptions, SlackReply, WaitForSlackReplyOptions };
+export { buildReviewModeBlock, getReviewModeDisplay, parseReviewMode };
+export type {
+    FetchFn,
+    RetryOptions,
+    SlackReply,
+    WaitForSlackReplyOptions,
+    ReviewModeDisplay,
+};
 
 export interface RepoConfig {
     displayName: string;
@@ -233,40 +246,7 @@ export function buildDoModalView(channelId: string): Record<string, unknown> {
                 },
                 optional: true,
             },
-            {
-                type: 'input',
-                block_id: 'review_mode',
-                label: {
-                    type: 'plain_text',
-                    text: 'PRレビューモード',
-                },
-                element: {
-                    type: 'static_select',
-                    action_id: 'value',
-                    placeholder: {
-                        type: 'plain_text',
-                        text: 'モードを選択',
-                    },
-                    initial_option: {
-                        text: { type: 'plain_text', text: '実装' },
-                        value: 'implement',
-                    },
-                    options: [
-                        {
-                            text: { type: 'plain_text', text: '実装' },
-                            value: 'implement',
-                        },
-                        {
-                            text: {
-                                type: 'plain_text',
-                                text: 'PRレビュー',
-                            },
-                            value: 'review',
-                        },
-                    ],
-                },
-                optional: true,
-            },
+            buildReviewModeBlock(),
         ],
     };
 }
@@ -343,9 +323,7 @@ export function parseModalValues(
     const issueId = stateValues.pbi?.value?.value ?? '';
     const baseBranch = stateValues.base_branch?.value?.value || undefined;
     const userRequest = stateValues.fix_description?.value?.value || undefined;
-    const reviewModeValue =
-        stateValues.review_mode?.value?.selected_option?.value ?? 'implement';
-    const reviewMode = reviewModeValue === 'review';
+    const reviewMode = parseReviewMode(stateValues);
 
     return {
         folders,
@@ -1708,14 +1686,14 @@ export async function startAgentTask(params: AgentTaskParams): Promise<void> {
             ? `${displayName}, ${relatedDisplayNames.join(', ')}`
             : displayName;
 
-    const modeLabel = reviewMode ? 'PRレビュー' : '実行';
+    const { modeLabel, modeEmoji, modeText } = getReviewModeDisplay(
+        reviewMode ?? false,
+    );
     console.log(
         `\n${timestamp()} 🚀 ${modeLabel}開始: ${allRepoNames}, ID: ${issueLabel}`,
     );
 
     // 1. 親メッセージを chat.postMessage で投稿 → ts (スレッドID) 取得
-    const modeEmoji = reviewMode ? '🔍' : '🚀';
-    const modeText = reviewMode ? 'PRレビュー' : '対応';
     const startMessage =
         relatedDisplayNames.length > 0
             ? `${modeEmoji} *${allRepoNames}* にて *${issueLabel}* の${modeText}を開始しました（複数リポジトリ）。\n進捗はこのスレッドでお知らせします。`
