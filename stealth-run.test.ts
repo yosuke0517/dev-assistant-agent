@@ -8,6 +8,20 @@ const __dirname = path.dirname(__filename);
 
 describe('stealth-run.sh', () => {
     const scriptPath = path.join(__dirname, 'stealth-run.sh');
+    const promptsDir = path.join(__dirname, 'prompts');
+
+    /** stealth-run.sh と prompts/ 配下の全 .sh ファイルを結合して返す */
+    function readAllPromptContent(): string {
+        const fs = require('node:fs');
+        let content = fs.readFileSync(scriptPath, 'utf8');
+        const promptFiles = fs
+            .readdirSync(promptsDir)
+            .filter((f: string) => f.endsWith('.sh'));
+        for (const f of promptFiles) {
+            content += `\n${fs.readFileSync(path.join(promptsDir, f), 'utf8')}`;
+        }
+        return content;
+    }
 
     it('スクリプトファイルが存在することを確認', async () => {
         // シェルスクリプトファイルの存在チェック
@@ -188,16 +202,14 @@ describe('stealth-run.sh', () => {
         expect(content).toContain('Falling back to auto-detection');
     });
 
-    it('プロンプトに ask_human MCPツール使用の指示が含まれる', async () => {
-        const fs = await import('node:fs');
-        const content = fs.readFileSync(scriptPath, 'utf8');
+    it('プロンプトに ask_human MCPツール使用の指示が含まれる', () => {
+        const content = readAllPromptContent();
         expect(content).toContain('ask_human MCPツールを使用して');
         expect(content).toContain('AskUserQuestion は使用禁止');
     });
 
-    it('USER_REQUESTモードのプロンプトが含まれる', async () => {
-        const fs = await import('node:fs');
-        const content = fs.readFileSync(scriptPath, 'utf8');
+    it('USER_REQUESTモードのプロンプトが含まれる', () => {
+        const content = readAllPromptContent();
         expect(content).toContain('USER_REQUEST');
         expect(content).toContain('ユーザーの要望');
         expect(content).toContain(
@@ -205,9 +217,8 @@ describe('stealth-run.sh', () => {
         );
     });
 
-    it('USER_REQUESTモードでagentとBacklog両方のプロンプトが存在する', async () => {
-        const fs = await import('node:fs');
-        const content = fs.readFileSync(scriptPath, 'utf8');
+    it('USER_REQUESTモードでagentとBacklog両方のプロンプトが存在する', () => {
+        const content = readAllPromptContent();
         // agent用のプロンプト
         expect(content).toContain(
             'Claude Code starting user request for GitHub Issue',
@@ -284,9 +295,8 @@ describe('stealth-run.sh', () => {
         expect(content).toContain('Will create a new branch with user request');
     });
 
-    it('USER_REQUEST新規課題モードのプロンプトが含まれる（GitHub）', async () => {
-        const fs = await import('node:fs');
-        const content = fs.readFileSync(scriptPath, 'utf8');
+    it('USER_REQUEST新規課題モードのプロンプトが含まれる（GitHub）', () => {
+        const content = readAllPromptContent();
         expect(content).toContain(
             'Claude Code starting new issue with user request for GitHub Issue',
         );
@@ -296,9 +306,8 @@ describe('stealth-run.sh', () => {
         );
     });
 
-    it('USER_REQUEST新規課題モードのプロンプトが含まれる（Backlog）', async () => {
-        const fs = await import('node:fs');
-        const content = fs.readFileSync(scriptPath, 'utf8');
+    it('USER_REQUEST新規課題モードのプロンプトが含まれる（Backlog）', () => {
+        const content = readAllPromptContent();
         expect(content).toContain(
             'Claude Code starting new issue with user request for Backlog Issue',
         );
@@ -307,29 +316,33 @@ describe('stealth-run.sh', () => {
         );
     });
 
-    it('USER_REQUEST新規課題モードではPR作成の指示が含まれる', async () => {
-        const fs = await import('node:fs');
-        const content = fs.readFileSync(scriptPath, 'utf8');
+    it('USER_REQUEST新規課題モードではPR作成の指示が含まれる', () => {
+        const fs = require('node:fs');
+        const userRequestContent = fs.readFileSync(
+            path.join(promptsDir, 'user-request.sh'),
+            'utf8',
+        );
         // USER_REQUEST_NEW_ISSUE条件とそのプロンプト内にPR作成指示がある
-        const newIssueSection = content.indexOf(
+        const newIssueSection = userRequestContent.indexOf(
             'USER_REQUEST_NEW_ISSUE" = "true"',
         );
         expect(newIssueSection).toBeGreaterThan(-1);
         // 新規課題モードのプロンプトにはPR作成指示がある（既存ブランチモードの「新しいPRは作成しないでください」とは異なる）
-        const afterNewIssue = content.substring(newIssueSection);
-        const nextElif = afterNewIssue.indexOf(
-            'elif [ -n "$USER_REQUEST" ]; then',
+        const afterNewIssue = userRequestContent.substring(newIssueSection);
+        // 新規モード部分（else節の直前まで）にPR作成指示がある
+        const elseBlock = afterNewIssue.indexOf('\nelse\n');
+        const newIssuePromptSection = afterNewIssue.substring(
+            0,
+            elseBlock > 0 ? elseBlock : undefined,
         );
-        const newIssuePromptSection = afterNewIssue.substring(0, nextElif);
         expect(newIssuePromptSection).toContain('PRを作成してください');
         expect(newIssuePromptSection).not.toContain(
             '新しいPRは作成しないでください',
         );
     });
 
-    it('USER_REQUESTモードのプロンプトで WORK_BRANCH が使用される', async () => {
-        const fs = await import('node:fs');
-        const content = fs.readFileSync(scriptPath, 'utf8');
+    it('USER_REQUESTモードのプロンプトで WORK_BRANCH が使用される', () => {
+        const content = readAllPromptContent();
         // USER_REQUEST プロンプトで WORK_BRANCH が使用される
         // biome-ignore lint/suspicious/noTemplateCurlyInString: shell variable reference, not JS template
         expect(content).toContain('${WORK_BRANCH}（既存ブランチ）');
@@ -345,6 +358,24 @@ describe('stealth-run.sh', () => {
         expect(content).toContain('for prefix in "feat" "fix"');
     });
 
+    it('REVIEW_MODE のプロンプトにレビュー観点が含まれる', () => {
+        const fs = require('node:fs');
+        const mainContent = fs.readFileSync(scriptPath, 'utf8');
+        const allContent = readAllPromptContent();
+        // REVIEW_MODE の条件分岐（stealth-run.sh本体）
+        expect(mainContent).toContain('if [ -n "$REVIEW_MODE" ]');
+        // レビュー観点が含まれる（prompts/ 配下）
+        expect(allContent).toContain('仕様充足性');
+        expect(allContent).toContain('スコープ逸脱');
+        expect(allContent).toContain('ロジックバグ');
+        expect(allContent).toContain('セキュリティ');
+        expect(allContent).toContain('リファクタリング');
+        // コード修正を行わない指示
+        expect(allContent).toContain(
+            'コードの修正は行わないでください。レビューと報告のみを行ってください',
+        );
+    });
+
     it('対象ブランチが存在する場合はそのブランチの先端からworktreeを開始する', async () => {
         const fs = await import('node:fs');
         const content = fs.readFileSync(scriptPath, 'utf8');
@@ -352,9 +383,8 @@ describe('stealth-run.sh', () => {
         expect(content).toContain('WORKTREE_START="origin/$BASE_BRANCH"');
     });
 
-    it('非agentプロジェクトのプロンプトにPR作成の指示が含まれる', async () => {
-        const fs = await import('node:fs');
-        const content = fs.readFileSync(scriptPath, 'utf8');
+    it('非agentプロジェクトのプロンプトにPR作成の指示が含まれる', () => {
+        const content = readAllPromptContent();
         // 非agentプロンプト（elseブロック）にPR作成指示がある
         expect(content).toContain(
             '作業ブランチをリモートにpushし、PRを作成してください',
@@ -384,16 +414,14 @@ describe('stealth-run.sh', () => {
         expect(content).toContain('Route-sec/jjp-loadsheet');
     });
 
-    it('GitHub Issueプロンプトでリポジトリ名がGITHUB_REPO変数から参照される', async () => {
-        const fs = await import('node:fs');
-        const content = fs.readFileSync(scriptPath, 'utf8');
+    it('GitHub Issueプロンプトでリポジトリ名がGITHUB_REPO変数から参照される', () => {
+        const content = readAllPromptContent();
         // biome-ignore lint/suspicious/noTemplateCurlyInString: shell variable reference, not JS template
         expect(content).toContain('${GITHUB_REPO} リポジトリの Issue');
     });
 
-    it('GitHub Issue用プロンプトにもPR不要タスクの対応指示が含まれる', async () => {
-        const fs = await import('node:fs');
-        const content = fs.readFileSync(scriptPath, 'utf8');
+    it('GitHub Issue用プロンプトにもPR不要タスクの対応指示が含まれる', () => {
+        const content = readAllPromptContent();
         // GitHub Issue用プロンプトにも調査・レポート系タスクの分岐がある
         expect(content).toContain('調査・リサーチのみを求める指示の場合');
         expect(content).toContain(
@@ -401,9 +429,8 @@ describe('stealth-run.sh', () => {
         );
     });
 
-    it('PR bodyのフォーマット指示がGitHub用とBacklog用の両方に含まれる', async () => {
-        const fs = await import('node:fs');
-        const content = fs.readFileSync(scriptPath, 'utf8');
+    it('PR bodyのフォーマット指示がGitHub用とBacklog用の両方に含まれる', () => {
+        const content = readAllPromptContent();
         // GitHub用とBacklog用の両方にフォーマット指示がある
         const formatMatches = content.match(/PR bodyのフォーマット - 必須/g);
         expect(formatMatches).not.toBeNull();
@@ -415,9 +442,8 @@ describe('stealth-run.sh', () => {
         expect(content).toContain('## Test plan');
     });
 
-    it('PRは必ずdraft状態で作成する指示が含まれる', async () => {
-        const fs = await import('node:fs');
-        const content = fs.readFileSync(scriptPath, 'utf8');
+    it('PRは必ずdraft状態で作成する指示が含まれる', () => {
+        const content = readAllPromptContent();
         // GitHub用プロンプトとBacklog用プロンプトの両方にdraft指示がある
         const draftMatches = content.match(/draft状態で作成/g);
         expect(draftMatches).not.toBeNull();
@@ -425,9 +451,8 @@ describe('stealth-run.sh', () => {
         expect(content).toContain('--draft');
     });
 
-    it('PRのマージ先にベースブランチを指定する指示が含まれる', async () => {
-        const fs = await import('node:fs');
-        const content = fs.readFileSync(scriptPath, 'utf8');
+    it('PRのマージ先にベースブランチを指定する指示が含まれる', () => {
+        const content = readAllPromptContent();
         // GitHub用プロンプトとBacklog用プロンプトの両方にベースブランチ指定がある
         const baseMatches = content.match(/--base \$\{BASE_BRANCH\}/g);
         expect(baseMatches).not.toBeNull();

@@ -13,6 +13,12 @@ import express, { type Request, type Response } from 'express';
 import fetch from 'node-fetch';
 import pty from 'node-pty';
 import {
+    buildReviewModeBlock,
+    getReviewModeDisplay,
+    parseReviewMode,
+    type ReviewModeDisplay,
+} from './lib/review-mode.js';
+import {
     type FetchFn,
     formatMention,
     postToSlack,
@@ -23,7 +29,14 @@ import {
 } from './lib/slack.js';
 
 export { formatMention, postToSlack, waitForSlackReply };
-export type { FetchFn, RetryOptions, SlackReply, WaitForSlackReplyOptions };
+export { buildReviewModeBlock, getReviewModeDisplay, parseReviewMode };
+export type {
+    FetchFn,
+    RetryOptions,
+    SlackReply,
+    WaitForSlackReplyOptions,
+    ReviewModeDisplay,
+};
 
 export interface RepoConfig {
     displayName: string;
@@ -233,6 +246,7 @@ export function buildDoModalView(channelId: string): Record<string, unknown> {
                 },
                 optional: true,
             },
+            buildReviewModeBlock(),
         ],
     };
 }
@@ -284,6 +298,7 @@ export interface ModalValues {
     issueId: string;
     baseBranch: string | undefined;
     userRequest: string | undefined;
+    reviewMode: boolean;
 }
 
 interface SlackViewStateValues {
@@ -308,8 +323,16 @@ export function parseModalValues(
     const issueId = stateValues.pbi?.value?.value ?? '';
     const baseBranch = stateValues.base_branch?.value?.value || undefined;
     const userRequest = stateValues.fix_description?.value?.value || undefined;
+    const reviewMode = parseReviewMode(stateValues);
 
-    return { folders, branchName, issueId, baseBranch, userRequest };
+    return {
+        folders,
+        branchName,
+        issueId,
+        baseBranch,
+        userRequest,
+        reviewMode,
+    };
 }
 
 function timestamp(): string {
@@ -509,6 +532,7 @@ interface InteractiveHandlerOptions {
     waitReplyFn?: typeof waitForSlackReply;
     timeoutMs?: number;
     originalCommand?: string;
+    userRequest?: string;
 }
 
 interface UserDecision {
@@ -524,6 +548,7 @@ export class InteractiveHandler {
     channel: string | null;
     threadTs: string | null;
     originalCommand: string | undefined;
+    userRequest: string | undefined;
     private _post: PostFn;
     private _waitReply: typeof waitForSlackReply;
     timeoutMs: number;
@@ -536,6 +561,7 @@ export class InteractiveHandler {
         this.channel = channel;
         this.threadTs = threadTs;
         this.originalCommand = options.originalCommand;
+        this.userRequest = options.userRequest;
         this._post = options.postFn || postToSlack;
         this._waitReply = options.waitReplyFn || waitForSlackReply;
         this.timeoutMs = options.timeoutMs || 10_800_000;
@@ -556,12 +582,16 @@ export class InteractiveHandler {
         const commandSection = this.originalCommand
             ? ['', '*実行コマンド:*', `\`/do ${this.originalCommand}\``, '']
             : [''];
+        const userRequestSection = this.userRequest
+            ? ['', '*指示内容:*', this.userRequest, '']
+            : [];
         const question = [
             `${mention}⚠️ *エラーが発生しました*`,
             '```',
             errorSummary.substring(0, 500),
             '```',
             ...commandSection,
+            ...userRequestSection,
             '続行方法を返信してください:',
             '• `retry` または `再実行` → 同じタスクを再実行',
             '• `abort` または `中断` → タスクを中断',
@@ -733,6 +763,7 @@ export function spawnWorker(
     userRequest: string | null = null,
     relatedRepos: RelatedRepo[] = [],
     branchName: string | null = null,
+    reviewMode = false,
 ): Promise<SpawnWorkerResult> {
     return new Promise((resolve) => {
         // Claude Code内から起動された場合のネスト検出を回避
@@ -777,6 +808,7 @@ export function spawnWorker(
                         )
                         .join(','),
                 }),
+                ...(reviewMode && { REVIEW_MODE: 'true' }),
             },
         });
 
@@ -1626,6 +1658,7 @@ export interface AgentTaskParams {
     relatedRepos: RelatedRepo[];
     channelId: string;
     rawCommand?: string;
+    reviewMode?: boolean;
 }
 
 /**
@@ -1642,6 +1675,7 @@ export async function startAgentTask(params: AgentTaskParams): Promise<void> {
         relatedRepos,
         channelId,
         rawCommand,
+        reviewMode,
     } = params;
 
     const repoConfig = getRepoConfig(folder);
@@ -1659,15 +1693,18 @@ export async function startAgentTask(params: AgentTaskParams): Promise<void> {
             ? `${displayName}, ${relatedDisplayNames.join(', ')}`
             : displayName;
 
+    const { modeLabel, modeEmoji, modeText } = getReviewModeDisplay(
+        reviewMode ?? false,
+    );
     console.log(
-        `\n${timestamp()} 🚀 実行開始: ${allRepoNames}, ID: ${issueLabel}`,
+        `\n${timestamp()} 🚀 ${modeLabel}開始: ${allRepoNames}, ID: ${issueLabel}`,
     );
 
     // 1. 親メッセージを chat.postMessage で投稿 → ts (スレッドID) 取得
     const startMessage =
         relatedDisplayNames.length > 0
-            ? `🚀 *${allRepoNames}* にて *${issueLabel}* の対応を開始しました（複数リポジトリ）。\n進捗はこのスレッドでお知らせします。`
-            : `🚀 *${displayName}* にて *${issueLabel}* の対応を開始しました。\n進捗はこのスレッドでお知らせします。`;
+            ? `${modeEmoji} *${allRepoNames}* にて *${issueLabel}* の${modeText}を開始しました（複数リポジトリ）。\n進捗はこのスレッドでお知らせします。`
+            : `${modeEmoji} *${displayName}* にて *${issueLabel}* の${modeText}を開始しました。\n進捗はこのスレッドでお知らせします。`;
     const parentTs = await postToSlack(channelId, startMessage);
 
     // 2. Slack進捗通知トラッカー（1分ごとにスレッドへ進捗を送信）
@@ -1677,6 +1714,7 @@ export async function startAgentTask(params: AgentTaskParams): Promise<void> {
     // 3. インタラクティブハンドラー（エラー時にSlackで確認）
     const interactive = new InteractiveHandler(channelId, parentTs, {
         originalCommand: rawCommand || undefined,
+        userRequest: userRequest || undefined,
     });
 
     const MAX_RETRIES = 3;
@@ -1708,6 +1746,7 @@ export async function startAgentTask(params: AgentTaskParams): Promise<void> {
             userRequest || null,
             relatedRepos,
             branchName || null,
+            reviewMode ?? false,
         );
         lastExitCode = exitCode;
         lastOutput = output;
@@ -1966,8 +2005,14 @@ app.post('/slack/interactions', async (req: Request, res: Response) => {
     const stateValues = payload.view.state?.values;
     if (!stateValues) return;
 
-    const { folders, branchName, issueId, baseBranch, userRequest } =
-        parseModalValues(stateValues);
+    const {
+        folders,
+        branchName,
+        issueId,
+        baseBranch,
+        userRequest,
+        reviewMode,
+    } = parseModalValues(stateValues);
 
     let channelId: string;
     try {
@@ -2005,6 +2050,7 @@ app.post('/slack/interactions', async (req: Request, res: Response) => {
         relatedRepos,
         channelId,
         rawCommand,
+        reviewMode,
     });
 });
 

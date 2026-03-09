@@ -1193,6 +1193,52 @@ describe('InteractiveHandler', () => {
         consoleSpy.mockRestore();
     });
 
+    it('userRequest設定時にエラーメッセージに指示内容が含まれる', async () => {
+        const consoleSpy = vi
+            .spyOn(console, 'log')
+            .mockImplementation(() => {});
+        const mockPost = vi.fn().mockResolvedValue('1234.5680');
+        const mockWaitReply = vi
+            .fn()
+            .mockResolvedValue({ text: 'retry', user: 'U123' });
+
+        const handler = new InteractiveHandler('C123456', '1234.5678', {
+            postFn: mockPost,
+            waitReplyFn: mockWaitReply,
+            userRequest: 'バグを修正してください',
+        });
+
+        await handler.askUser('test error');
+
+        const sentText = mockPost.mock.calls[0][1];
+        expect(sentText).toContain('*指示内容:*');
+        expect(sentText).toContain('バグを修正してください');
+
+        consoleSpy.mockRestore();
+    });
+
+    it('userRequest未設定時はエラーメッセージに指示内容が含まれない', async () => {
+        const consoleSpy = vi
+            .spyOn(console, 'log')
+            .mockImplementation(() => {});
+        const mockPost = vi.fn().mockResolvedValue('1234.5680');
+        const mockWaitReply = vi
+            .fn()
+            .mockResolvedValue({ text: 'retry', user: 'U123' });
+
+        const handler = new InteractiveHandler('C123456', '1234.5678', {
+            postFn: mockPost,
+            waitReplyFn: mockWaitReply,
+        });
+
+        await handler.askUser('test error');
+
+        const sentText = mockPost.mock.calls[0][1];
+        expect(sentText).not.toContain('*指示内容:*');
+
+        consoleSpy.mockRestore();
+    });
+
     it('originalCommand未設定時はエラーメッセージに実行コマンドが含まれない', async () => {
         const consoleSpy = vi
             .spyOn(console, 'log')
@@ -1675,14 +1721,15 @@ describe('buildDoModalView', () => {
         expect(metadata.channel_id).toBe('C999888');
     });
 
-    it('4つの入力ブロックを持つ', () => {
+    it('5つの入力ブロックを持つ', () => {
         const view = buildDoModalView('C123456');
         const blocks = view.blocks as Array<{ block_id: string }>;
-        expect(blocks).toHaveLength(4);
+        expect(blocks).toHaveLength(5);
         expect(blocks[0].block_id).toBe('repository');
         expect(blocks[1].block_id).toBe('pbi');
         expect(blocks[2].block_id).toBe('base_branch');
         expect(blocks[3].block_id).toBe('fix_description');
+        expect(blocks[4].block_id).toBe('review_mode');
     });
 
     it('repositoryブロックに6つのオプションがある', () => {
@@ -1852,6 +1899,7 @@ describe('parseModalValues', () => {
             issueId: 'RA_DEV-85',
             baseBranch: 'develop',
             userRequest: 'バグを修正してください',
+            reviewMode: false,
         });
     });
 
@@ -1885,6 +1933,7 @@ describe('parseModalValues', () => {
             issueId: '42',
             baseBranch: undefined,
             userRequest: undefined,
+            reviewMode: false,
         });
     });
 
@@ -1897,6 +1946,7 @@ describe('parseModalValues', () => {
             issueId: '',
             baseBranch: undefined,
             userRequest: undefined,
+            reviewMode: false,
         });
     });
 
@@ -1958,6 +2008,70 @@ describe('parseModalValues', () => {
             'circus_frontend',
             'circus_agent_ecosystem',
         ]);
+    });
+
+    it('レビューモードが選択された場合reviewMode=trueを返す', () => {
+        const stateValues = {
+            repository: {
+                value: {
+                    type: 'multi_static_select',
+                    selected_options: [{ value: 'agent' }],
+                },
+            },
+            branch: {
+                value: { type: 'plain_text_input', value: '' },
+            },
+            pbi: {
+                value: { type: 'plain_text_input', value: '87' },
+            },
+            base_branch: {
+                value: { type: 'plain_text_input', value: null },
+            },
+            fix_description: {
+                value: { type: 'plain_text_input', value: null },
+            },
+            review_mode: {
+                value: {
+                    type: 'static_select',
+                    selected_option: { value: 'review' },
+                },
+            },
+        };
+
+        const result: ModalValues = parseModalValues(stateValues);
+        expect(result.reviewMode).toBe(true);
+    });
+
+    it('実装モードが選択された場合reviewMode=falseを返す', () => {
+        const stateValues = {
+            repository: {
+                value: {
+                    type: 'multi_static_select',
+                    selected_options: [{ value: 'agent' }],
+                },
+            },
+            branch: {
+                value: { type: 'plain_text_input', value: '' },
+            },
+            pbi: {
+                value: { type: 'plain_text_input', value: '87' },
+            },
+            base_branch: {
+                value: { type: 'plain_text_input', value: null },
+            },
+            fix_description: {
+                value: { type: 'plain_text_input', value: null },
+            },
+            review_mode: {
+                value: {
+                    type: 'static_select',
+                    selected_option: { value: 'implement' },
+                },
+            },
+        };
+
+        const result: ModalValues = parseModalValues(stateValues);
+        expect(result.reviewMode).toBe(false);
     });
 });
 
