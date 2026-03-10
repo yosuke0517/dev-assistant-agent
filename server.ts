@@ -13,6 +13,7 @@ import express, { type Request, type Response } from 'express';
 import fetch from 'node-fetch';
 import pty from 'node-pty';
 import {
+    type AgentMode,
     buildReviewModeBlock,
     getReviewModeDisplay,
     parseReviewMode,
@@ -31,6 +32,7 @@ import {
 export { formatMention, postToSlack, waitForSlackReply };
 export { buildReviewModeBlock, getReviewModeDisplay, parseReviewMode };
 export type {
+    AgentMode,
     FetchFn,
     RetryOptions,
     SlackReply,
@@ -298,7 +300,7 @@ export interface ModalValues {
     issueId: string;
     baseBranch: string | undefined;
     userRequest: string | undefined;
-    reviewMode: boolean;
+    reviewMode: AgentMode;
 }
 
 interface SlackViewStateValues {
@@ -763,7 +765,7 @@ export function spawnWorker(
     userRequest: string | null = null,
     relatedRepos: RelatedRepo[] = [],
     branchName: string | null = null,
-    reviewMode = false,
+    reviewMode: AgentMode = 'implement',
 ): Promise<SpawnWorkerResult> {
     return new Promise((resolve) => {
         // Claude Code内から起動された場合のネスト検出を回避
@@ -808,7 +810,10 @@ export function spawnWorker(
                         )
                         .join(','),
                 }),
-                ...(reviewMode && { REVIEW_MODE: 'true' }),
+                ...(reviewMode === 'review' && { REVIEW_MODE: 'true' }),
+                ...(reviewMode === 'review-fix' && {
+                    REVIEW_FIX_MODE: 'true',
+                }),
             },
         });
 
@@ -1658,7 +1663,7 @@ export interface AgentTaskParams {
     relatedRepos: RelatedRepo[];
     channelId: string;
     rawCommand?: string;
-    reviewMode?: boolean;
+    reviewMode?: AgentMode;
 }
 
 /**
@@ -1694,7 +1699,7 @@ export async function startAgentTask(params: AgentTaskParams): Promise<void> {
             : displayName;
 
     const { modeLabel, modeEmoji, modeText } = getReviewModeDisplay(
-        reviewMode ?? false,
+        reviewMode ?? 'implement',
     );
     console.log(
         `\n${timestamp()} 🚀 ${modeLabel}開始: ${allRepoNames}, ID: ${issueLabel}`,
@@ -1746,7 +1751,7 @@ export async function startAgentTask(params: AgentTaskParams): Promise<void> {
             userRequest || null,
             relatedRepos,
             branchName || null,
-            reviewMode ?? false,
+            reviewMode ?? 'implement',
         );
         lastExitCode = exitCode;
         lastOutput = output;

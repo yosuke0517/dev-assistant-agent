@@ -84,10 +84,34 @@ git -C "$TARGET_PATH" fetch origin "$BASE_BRANCH"
 # 3.5. stale worktree 参照のクリーンアップ
 git -C "$TARGET_PATH" worktree prune 2>/dev/null || true
 
-# 3.6. USER_REQUEST/FOLLOW_UP モードで対象ブランチの競合を検出・解消
+# 3.6. USER_REQUEST/FOLLOW_UP/REVIEW_FIX モードで対象ブランチの競合を検出・解消
 TARGET_BRANCH=""
 WORK_BRANCH=""
-if [ -n "$USER_REQUEST" ]; then
+if [ -n "$REVIEW_FIX_MODE" ]; then
+    # PRレビューFB対応モード: 課題IDから既存のフィーチャーブランチを自動検出
+    if [ -n "$GITHUB_REPO" ]; then
+        for prefix in "feat" "fix"; do
+            git -C "$TARGET_PATH" fetch origin "${prefix}/issue-${ISSUE_ID}" 2>/dev/null || true
+            if git -C "$TARGET_PATH" rev-parse --verify "origin/${prefix}/issue-${ISSUE_ID}" >/dev/null 2>&1; then
+                TARGET_BRANCH="${prefix}/issue-${ISSUE_ID}"
+                WORK_BRANCH="${prefix}/issue-${ISSUE_ID}"
+                break
+            fi
+        done
+    else
+        git -C "$TARGET_PATH" fetch origin "feat/${ISSUE_ID}" 2>/dev/null || true
+        if git -C "$TARGET_PATH" rev-parse --verify "origin/feat/${ISSUE_ID}" >/dev/null 2>&1; then
+            TARGET_BRANCH="feat/${ISSUE_ID}"
+            WORK_BRANCH="feat/${ISSUE_ID}"
+        fi
+    fi
+
+    if [ -z "$WORK_BRANCH" ]; then
+        echo "Error: No existing feature branch found for issue ${ISSUE_ID}. Review fix mode requires an existing PR branch."
+        exit 1
+    fi
+    echo "Review fix branch (auto-detected): $WORK_BRANCH"
+elif [ -n "$USER_REQUEST" ]; then
     if [ -n "$BASE_BRANCH_ARG" ]; then
         # 明示的にブランチが指定された場合はそのまま使用
         TARGET_BRANCH="$BASE_BRANCH"
@@ -378,6 +402,8 @@ git config user.email "$GIT_USER_EMAIL"
 PROMPTS_DIR="$SCRIPT_DIR/prompts"
 if [ -n "$REVIEW_MODE" ]; then
     source "$PROMPTS_DIR/review.sh"
+elif [ -n "$REVIEW_FIX_MODE" ]; then
+    source "$PROMPTS_DIR/review-fix.sh"
 elif [ -n "$FOLLOW_UP_MESSAGE" ]; then
     source "$PROMPTS_DIR/follow-up.sh"
 elif [ -n "$USER_REQUEST" ] && [ "$USER_REQUEST_NEW_ISSUE" = "true" ]; then
@@ -389,7 +415,7 @@ else
 fi
 
 # ユーザーからの追加指示がある場合はプロンプトに付与（通常モードのみ）
-if [ -z "$FOLLOW_UP_MESSAGE" ] && [ -z "$REVIEW_MODE" ] && [ -n "$EXTRA_PROMPT" ]; then
+if [ -z "$FOLLOW_UP_MESSAGE" ] && [ -z "$REVIEW_MODE" ] && [ -z "$REVIEW_FIX_MODE" ] && [ -n "$EXTRA_PROMPT" ]; then
     PROMPT="${PROMPT}
 
 【ユーザーからの追加指示】
