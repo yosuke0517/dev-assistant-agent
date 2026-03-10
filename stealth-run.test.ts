@@ -406,7 +406,12 @@ describe('stealth-run.sh', () => {
     it('全モードのプロンプトで USER_REQUEST が反映可能である', () => {
         const fs = require('node:fs');
         // 各モードのプロンプトファイルでUSER_REQUEST_SECTIONが使われていることを確認
-        const modes = ['review.sh', 'review-fix.sh', 'implement.sh', 'user-request.sh'];
+        const modes = [
+            'review.sh',
+            'review-fix.sh',
+            'implement.sh',
+            'user-request.sh',
+        ];
         for (const mode of modes) {
             const content = fs.readFileSync(
                 path.join(promptsDir, mode),
