@@ -6,6 +6,16 @@
 PROMPTS_DIR="${PROMPTS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)}"
 source "$PROMPTS_DIR/_common.sh"
 
+USER_REQUEST_SECTION=""
+if [ -n "$USER_REQUEST" ]; then
+    USER_REQUEST_SECTION="
+【ユーザーからの補足指示】
+${USER_REQUEST}
+
+上記の補足指示も考慮して実装を行ってください。
+"
+fi
+
 if [ -n "$GITHUB_REPO" ]; then
     echo "Claude Code starting for GitHub Issue: #${ISSUE_ID} (${GITHUB_REPO})..."
     if [ -n "$BRANCH_NAME" ]; then
@@ -15,7 +25,7 @@ if [ -n "$GITHUB_REPO" ]; then
     fi
 
     PROMPT="以下のSTEPに従って作業してください。
-
+${USER_REQUEST_SECTION}
 STEP1: GitHub MCPを使用して ${GITHUB_REPO} リポジトリの Issue #${ISSUE_ID} の内容を確認してください。
 ${BRANCH_INSTRUCTION}
 ブランチ作成後、必ずそのブランチに切り替えてください。
@@ -42,7 +52,7 @@ else
     fi
 
     PROMPT="以下のSTEPに従って作業してください。
-
+${USER_REQUEST_SECTION}
 STEP1: Backlog MCPを使用して課題 ${ISSUE_ID} の内容を確認し、${BACKLOG_BRANCH_INSTRUCTION}\
 
 STEP2: 課題内容に基づいてコードを実装し、テストをパスさせてください。\

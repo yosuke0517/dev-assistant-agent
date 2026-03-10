@@ -358,6 +358,71 @@ describe('stealth-run.sh', () => {
         expect(content).toContain('for prefix in "feat" "fix"');
     });
 
+    it('REVIEW_MODE のプロンプトで USER_REQUEST が反映される', () => {
+        const fs = require('node:fs');
+        const reviewContent = fs.readFileSync(
+            path.join(promptsDir, 'review.sh'),
+            'utf8',
+        );
+        // USER_REQUEST_SECTIONの条件分岐が存在する
+        expect(reviewContent).toContain('USER_REQUEST_SECTION=""');
+        expect(reviewContent).toContain('if [ -n "$USER_REQUEST" ]');
+        expect(reviewContent).toContain('ユーザーからの補足指示');
+        // プロンプト内にUSER_REQUEST_SECTIONが展開される
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: shell variable reference, not JS template
+        expect(reviewContent).toContain('${USER_REQUEST_SECTION}');
+    });
+
+    it('REVIEW_FIX_MODE のプロンプトで USER_REQUEST が反映される', () => {
+        const fs = require('node:fs');
+        const reviewFixContent = fs.readFileSync(
+            path.join(promptsDir, 'review-fix.sh'),
+            'utf8',
+        );
+        // USER_REQUEST_SECTIONの条件分岐が存在する
+        expect(reviewFixContent).toContain('USER_REQUEST_SECTION=""');
+        expect(reviewFixContent).toContain('if [ -n "$USER_REQUEST" ]');
+        expect(reviewFixContent).toContain('ユーザーからの補足指示');
+        // プロンプト内にUSER_REQUEST_SECTIONが展開される
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: shell variable reference, not JS template
+        expect(reviewFixContent).toContain('${USER_REQUEST_SECTION}');
+    });
+
+    it('implement モードのプロンプトで USER_REQUEST が反映される', () => {
+        const fs = require('node:fs');
+        const implementContent = fs.readFileSync(
+            path.join(promptsDir, 'implement.sh'),
+            'utf8',
+        );
+        // USER_REQUEST_SECTIONの条件分岐が存在する
+        expect(implementContent).toContain('USER_REQUEST_SECTION=""');
+        expect(implementContent).toContain('if [ -n "$USER_REQUEST" ]');
+        expect(implementContent).toContain('ユーザーからの補足指示');
+        // プロンプト内にUSER_REQUEST_SECTIONが展開される
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: shell variable reference, not JS template
+        expect(implementContent).toContain('${USER_REQUEST_SECTION}');
+    });
+
+    it('全モードのプロンプトで USER_REQUEST が反映可能である', () => {
+        const fs = require('node:fs');
+        // 各モードのプロンプトファイルでUSER_REQUEST_SECTIONが使われていることを確認
+        const modes = ['review.sh', 'review-fix.sh', 'implement.sh', 'user-request.sh'];
+        for (const mode of modes) {
+            const content = fs.readFileSync(
+                path.join(promptsDir, mode),
+                'utf8',
+            );
+            // user-request.shは直接USER_REQUESTを使用、その他はUSER_REQUEST_SECTIONを使用
+            if (mode === 'user-request.sh') {
+                // biome-ignore lint/suspicious/noTemplateCurlyInString: shell variable reference, not JS template
+                expect(content).toContain('${USER_REQUEST}');
+            } else {
+                // biome-ignore lint/suspicious/noTemplateCurlyInString: shell variable reference, not JS template
+                expect(content).toContain('${USER_REQUEST_SECTION}');
+            }
+        }
+    });
+
     it('REVIEW_FIX_MODE のプロンプトにレビュー指摘修正の指示が含まれる', () => {
         const content = readAllPromptContent();
         // REVIEW_FIX_MODE の条件分岐
