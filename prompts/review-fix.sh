@@ -6,6 +6,16 @@
 PROMPTS_DIR="${PROMPTS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)}"
 source "$PROMPTS_DIR/_common.sh"
 
+USER_REQUEST_SECTION=""
+if [ -n "$USER_REQUEST" ]; then
+    USER_REQUEST_SECTION="
+【ユーザーからの補足指示】
+${USER_REQUEST}
+
+上記の補足指示も考慮して修正を行ってください。
+"
+fi
+
 if [ -n "$GITHUB_REPO" ]; then
     echo "Claude Code starting review fix for GitHub Issue: #${ISSUE_ID} on branch ${WORK_BRANCH} (${GITHUB_REPO})..."
     PROMPT="あなたはPRレビュー指摘の修正担当です。以下の手順でレビュー指摘を修正してください。
@@ -13,7 +23,7 @@ if [ -n "$GITHUB_REPO" ]; then
 【リポジトリ】${GITHUB_REPO}
 【対象ブランチ】${WORK_BRANCH}
 【課題ID】GitHub Issue #${ISSUE_ID}
-
+${USER_REQUEST_SECTION}
 ## 手順
 
 STEP1: GitHub MCPを使用して ${GITHUB_REPO} リポジトリの Issue #${ISSUE_ID} の内容を取得してください。これが元の仕様です。
@@ -59,7 +69,7 @@ else
 
 【対象ブランチ】${WORK_BRANCH}
 【課題ID】${ISSUE_ID}
-
+${USER_REQUEST_SECTION}
 ## 手順
 
 STEP1: Backlog MCPを使用して課題 ${ISSUE_ID} の内容を取得してください。これが元の仕様です。
