@@ -358,6 +358,40 @@ describe('stealth-run.sh', () => {
         expect(content).toContain('for prefix in "feat" "fix"');
     });
 
+    it('REVIEW_FIX_MODE のプロンプトにレビュー指摘修正の指示が含まれる', () => {
+        const content = readAllPromptContent();
+        // REVIEW_FIX_MODE の条件分岐
+        const mainContent = require('node:fs').readFileSync(scriptPath, 'utf8');
+        expect(mainContent).toContain('REVIEW_FIX_MODE');
+        // レビュー指摘修正の指示が含まれる
+        expect(content).toContain('レビュー指摘の修正担当');
+        expect(content).toContain('レビューコメントを取得');
+        // 既存PRへのpush指示（新規PR作成しない）
+        expect(content).toContain(
+            '新しいPRは作成しないでください。既存のブランチへのpushで自動的にPRが更新されます',
+        );
+    });
+
+    it('REVIEW_FIX_MODE でGitHubとBacklog両方のプロンプトが存在する', () => {
+        const content = readAllPromptContent();
+        expect(content).toContain(
+            'Claude Code starting review fix for GitHub Issue',
+        );
+        expect(content).toContain(
+            'Claude Code starting review fix for Backlog Issue',
+        );
+    });
+
+    it('REVIEW_FIX_MODE で対象ブランチの自動検出ロジックが含まれる', () => {
+        const fs = require('node:fs');
+        const content = fs.readFileSync(scriptPath, 'utf8');
+        expect(content).toContain('REVIEW_FIX_MODE');
+        expect(content).toContain('Review fix branch (auto-detected)');
+        expect(content).toContain(
+            'Review fix mode requires an existing PR branch',
+        );
+    });
+
     it('REVIEW_MODE のプロンプトにレビュー観点が含まれる', () => {
         const fs = require('node:fs');
         const mainContent = fs.readFileSync(scriptPath, 'utf8');

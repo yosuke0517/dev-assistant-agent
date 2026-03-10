@@ -1899,7 +1899,7 @@ describe('parseModalValues', () => {
             issueId: 'RA_DEV-85',
             baseBranch: 'develop',
             userRequest: 'バグを修正してください',
-            reviewMode: false,
+            reviewMode: 'implement',
         });
     });
 
@@ -1933,7 +1933,7 @@ describe('parseModalValues', () => {
             issueId: '42',
             baseBranch: undefined,
             userRequest: undefined,
-            reviewMode: false,
+            reviewMode: 'implement',
         });
     });
 
@@ -1946,7 +1946,7 @@ describe('parseModalValues', () => {
             issueId: '',
             baseBranch: undefined,
             userRequest: undefined,
-            reviewMode: false,
+            reviewMode: 'implement',
         });
     });
 
@@ -2010,7 +2010,7 @@ describe('parseModalValues', () => {
         ]);
     });
 
-    it('レビューモードが選択された場合reviewMode=trueを返す', () => {
+    it('レビューモードが選択された場合reviewMode=reviewを返す', () => {
         const stateValues = {
             repository: {
                 value: {
@@ -2039,10 +2039,10 @@ describe('parseModalValues', () => {
         };
 
         const result: ModalValues = parseModalValues(stateValues);
-        expect(result.reviewMode).toBe(true);
+        expect(result.reviewMode).toBe('review');
     });
 
-    it('実装モードが選択された場合reviewMode=falseを返す', () => {
+    it('実装モードが選択された場合reviewMode=implementを返す', () => {
         const stateValues = {
             repository: {
                 value: {
@@ -2071,7 +2071,39 @@ describe('parseModalValues', () => {
         };
 
         const result: ModalValues = parseModalValues(stateValues);
-        expect(result.reviewMode).toBe(false);
+        expect(result.reviewMode).toBe('implement');
+    });
+
+    it('レビューFB対応モードが選択された場合reviewMode=review-fixを返す', () => {
+        const stateValues = {
+            repository: {
+                value: {
+                    type: 'multi_static_select',
+                    selected_options: [{ value: 'agent' }],
+                },
+            },
+            branch: {
+                value: { type: 'plain_text_input', value: '' },
+            },
+            pbi: {
+                value: { type: 'plain_text_input', value: '87' },
+            },
+            base_branch: {
+                value: { type: 'plain_text_input', value: null },
+            },
+            fix_description: {
+                value: { type: 'plain_text_input', value: null },
+            },
+            review_mode: {
+                value: {
+                    type: 'static_select',
+                    selected_option: { value: 'review-fix' },
+                },
+            },
+        };
+
+        const result: ModalValues = parseModalValues(stateValues);
+        expect(result.reviewMode).toBe('review-fix');
     });
 });
 

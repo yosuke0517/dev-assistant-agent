@@ -1,10 +1,15 @@
 /**
- * PRレビューモード関連のロジック
+ * モード関連のロジック
  * モーダルUIブロック、表示ラベル生成など
  */
 
 /**
- * /do モーダルのレビューモード選択ブロックを生成する
+ * エージェントモードの型定義
+ */
+export type AgentMode = 'implement' | 'review' | 'review-fix';
+
+/**
+ * /do モーダルのモード選択ブロックを生成する
  */
 export function buildReviewModeBlock(): Record<string, unknown> {
     return {
@@ -12,7 +17,7 @@ export function buildReviewModeBlock(): Record<string, unknown> {
         block_id: 'review_mode',
         label: {
             type: 'plain_text',
-            text: 'PRレビューモード',
+            text: 'モード',
         },
         element: {
             type: 'static_select',
@@ -37,6 +42,13 @@ export function buildReviewModeBlock(): Record<string, unknown> {
                     },
                     value: 'review',
                 },
+                {
+                    text: {
+                        type: 'plain_text',
+                        text: 'PRレビューFB対応',
+                    },
+                    value: 'review-fix',
+                },
             ],
         },
         optional: true,
@@ -44,7 +56,7 @@ export function buildReviewModeBlock(): Record<string, unknown> {
 }
 
 /**
- * レビューモードに応じた表示ラベルを返す
+ * モードに応じた表示ラベルを返す
  */
 export interface ReviewModeDisplay {
     modeLabel: string;
@@ -52,16 +64,31 @@ export interface ReviewModeDisplay {
     modeText: string;
 }
 
-export function getReviewModeDisplay(reviewMode: boolean): ReviewModeDisplay {
-    return {
-        modeLabel: reviewMode ? 'PRレビュー' : '実行',
-        modeEmoji: reviewMode ? '🔍' : '🚀',
-        modeText: reviewMode ? 'PRレビュー' : '対応',
-    };
+export function getReviewModeDisplay(mode: AgentMode): ReviewModeDisplay {
+    switch (mode) {
+        case 'review':
+            return {
+                modeLabel: 'PRレビュー',
+                modeEmoji: '🔍',
+                modeText: 'PRレビュー',
+            };
+        case 'review-fix':
+            return {
+                modeLabel: 'PRレビューFB対応',
+                modeEmoji: '🔧',
+                modeText: 'レビューFB対応',
+            };
+        default:
+            return {
+                modeLabel: '実行',
+                modeEmoji: '🚀',
+                modeText: '対応',
+            };
+    }
 }
 
 /**
- * Slackモーダルの state values から reviewMode を解析する
+ * Slackモーダルの state values から mode を解析する
  */
 export function parseReviewMode(
     stateValues: Record<
@@ -73,8 +100,11 @@ export function parseReviewMode(
             }
         >
     >,
-): boolean {
-    const reviewModeValue =
+): AgentMode {
+    const modeValue =
         stateValues.review_mode?.value?.selected_option?.value ?? 'implement';
-    return reviewModeValue === 'review';
+    if (modeValue === 'review' || modeValue === 'review-fix') {
+        return modeValue;
+    }
+    return 'implement';
 }
