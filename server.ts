@@ -892,6 +892,42 @@ export function extractResultText(output: string): string | null {
     return null;
 }
 
+/**
+ * 完了メッセージの結果部分を組み立てる
+ * レビューモードではレポートをそのまま返し、
+ * それ以外ではPR URLまたは結果テキストを返す
+ */
+export function buildResultMessage(
+    output: string,
+    reviewMode: AgentMode,
+): string {
+    const isReviewMode = reviewMode === 'review';
+    const resultText = extractResultText(output);
+
+    if (isReviewMode && resultText) {
+        const truncated =
+            resultText.length > 3000
+                ? `${resultText.substring(0, 3000)}...`
+                : resultText;
+        return `\n${truncated}`;
+    }
+
+    const prUrl = extractLastPrUrl(output);
+    if (prUrl) {
+        return `\nPRが作成されました: ${prUrl}`;
+    }
+
+    if (resultText) {
+        const truncated =
+            resultText.length > 1500
+                ? `${resultText.substring(0, 1500)}...`
+                : resultText;
+        return `\n📝 実行結果:\n${truncated}`;
+    }
+
+    return '\nPRの作成を確認できませんでした。詳細はターミナルのログを確認してください。';
+}
+
 /** 出力からエラーサマリーを抽出する */
 export function extractErrorSummary(output: string): string {
     // ANSIエスケープシーケンスを除去
@@ -1838,31 +1874,17 @@ export async function startAgentTask(params: AgentTaskParams): Promise<void> {
 
     // 5. 完了メッセージをスレッドに投稿
     if (channelId && parentTs) {
-        const prUrl = extractLastPrUrl(lastOutput);
-        let resultMessage: string;
-        if (prUrl) {
-            resultMessage = `\nPRが作成されました: ${prUrl}`;
-        } else {
-            const resultText = extractResultText(lastOutput);
-            if (resultText) {
-                const truncated =
-                    resultText.length > 1500
-                        ? `${resultText.substring(0, 1500)}...`
-                        : resultText;
-                resultMessage = `\n📝 実行結果:\n${truncated}`;
-            } else {
-                resultMessage =
-                    '\nPRの作成を確認できませんでした。詳細はターミナルのログを確認してください。';
-            }
-        }
-
+        const resultMessage = buildResultMessage(
+            lastOutput,
+            reviewMode ?? 'implement',
+        );
         const retryInfo = attempt > 1 ? ` (試行回数: ${attempt})` : '';
 
         try {
             const mention = formatMention();
             await postToSlack(
                 channelId,
-                `${mention}${lastExitCode === 0 ? '✅' : '❌'} *${issueLabel}* の対応が${lastExitCode === 0 ? '完了' : '終了'}しました！ (Exit Code: ${lastExitCode})${retryInfo}${resultMessage}`,
+                `${mention}${lastExitCode === 0 ? '✅' : '❌'} *${issueLabel}* の${modeText}が${lastExitCode === 0 ? '完了' : '終了'}しました！ (Exit Code: ${lastExitCode})${retryInfo}${resultMessage}`,
                 parentTs,
             );
         } catch (err) {

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
     buildDoModalView,
+    buildResultMessage,
     type createPlaywrightClient,
     extractErrorSummary,
     extractLastPrUrl,
@@ -1500,6 +1501,65 @@ describe('extractResultText', () => {
         ].join('\n');
         const result = extractResultText(output);
         expect(result).toBe('Issue #66にコメントを追加しました。');
+    });
+});
+
+describe('buildResultMessage', () => {
+    it('レビューモードでresultTextがある場合、レポートをそのまま返す', () => {
+        const output = [
+            '{"type":"system","session_id":"abc123"}',
+            '{"type":"result","subtype":"success","result":"📋 *PRレビューレポート*\\n\\n*総合評価:* ✅ 承認可能\\n\\n*指摘件数:*\\n• Critical: 0件\\n• Warning: 1件\\n• Info: 2件","cost_usd":0.05}',
+        ].join('\n');
+        const result = buildResultMessage(output, 'review');
+        expect(result).toContain('PRレビューレポート');
+        expect(result).toContain('承認可能');
+        expect(result).not.toContain('📝 実行結果');
+    });
+
+    it('レビューモードでresultTextが3000文字を超える場合、切り詰める', () => {
+        const longText = 'a'.repeat(3500);
+        const output = `{"type":"result","subtype":"success","result":"${longText}","cost_usd":0.05}`;
+        const result = buildResultMessage(output, 'review');
+        expect(result.length).toBeLessThan(3500);
+        expect(result).toContain('...');
+    });
+
+    it('実装モードでPR URLがある場合、PR URLを返す', () => {
+        const output = [
+            '{"type":"assistant","message":{"content":[{"type":"text","text":"PRを作成しました https://github.com/owner/repo/pull/123"}]}}',
+            '{"type":"result","subtype":"success","result":"PRを作成しました https://github.com/owner/repo/pull/123","cost_usd":0.05}',
+        ].join('\n');
+        const result = buildResultMessage(output, 'implement');
+        expect(result).toContain('PRが作成されました');
+        expect(result).toContain('https://github.com/owner/repo/pull/123');
+    });
+
+    it('実装モードでresultTextのみの場合、実行結果として返す', () => {
+        const output =
+            '{"type":"result","subtype":"success","result":"調査が完了しました。","cost_usd":0.05}';
+        const result = buildResultMessage(output, 'implement');
+        expect(result).toContain('📝 実行結果');
+        expect(result).toContain('調査が完了しました。');
+    });
+
+    it('実装モードでresultTextが1500文字を超える場合、切り詰める', () => {
+        const longText = 'b'.repeat(2000);
+        const output = `{"type":"result","subtype":"success","result":"${longText}","cost_usd":0.05}`;
+        const result = buildResultMessage(output, 'implement');
+        expect(result.length).toBeLessThan(2000);
+        expect(result).toContain('...');
+    });
+
+    it('何も抽出できない場合、デフォルトメッセージを返す', () => {
+        const output = '{"type":"system","session_id":"abc123"}';
+        const result = buildResultMessage(output, 'implement');
+        expect(result).toContain('PRの作成を確認できませんでした');
+    });
+
+    it('レビューモードでresultTextがない場合、デフォルトメッセージを返す', () => {
+        const output = '{"type":"system","session_id":"abc123"}';
+        const result = buildResultMessage(output, 'review');
+        expect(result).toContain('PRの作成を確認できませんでした');
     });
 });
 
