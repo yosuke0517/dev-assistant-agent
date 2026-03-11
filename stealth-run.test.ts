@@ -480,6 +480,21 @@ describe('stealth-run.sh', () => {
         );
     });
 
+    it('REVIEW_MODE のプロンプトにSlackレポート出力指示が含まれる', () => {
+        const allContent = readAllPromptContent();
+        // Slackレポートのフォーマット指示
+        expect(allContent).toContain('PRレビューレポート');
+        expect(allContent).toContain('総合評価');
+        expect(allContent).toContain('指摘件数');
+        expect(allContent).toContain('Critical');
+        expect(allContent).toContain('Warning');
+        expect(allContent).toContain('Info');
+        // レビュー結果をテキストとして出力する指示
+        expect(allContent).toContain(
+            'ツール呼び出しではなく、必ずテキストとして出力してください',
+        );
+    });
+
     it('対象ブランチが存在する場合はそのブランチの先端からworktreeを開始する', async () => {
         const fs = await import('node:fs');
         const content = fs.readFileSync(scriptPath, 'utf8');
