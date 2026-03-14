@@ -26,17 +26,21 @@ if [ -n "$GITHUB_REPO" ]; then
 
     PROMPT="以下のSTEPに従って作業してください。
 ${USER_REQUEST_SECTION}
-STEP1: GitHub MCPを使用して ${GITHUB_REPO} リポジトリの Issue #${ISSUE_ID} の内容を確認してください。
+STEP1: 以下のghコマンドで ${GITHUB_REPO} リポジトリの Issue #${ISSUE_ID} の内容を確認してください。
+\`\`\`
+gh issue view ${ISSUE_ID} --repo ${GITHUB_REPO}
+\`\`\`
 ${BRANCH_INSTRUCTION}
 ブランチ作成後、必ずそのブランチに切り替えてください。
 
 STEP2: Issue内容に基づいてコードを実装し、テストをパスさせてください。
 適切な粒度でコミットしてください。
 
-STEP3: すべての作業が完了したら、作業ブランチをリモートにpushし、GitHub MCPを使用してPRを作成してください。
+STEP3: すべての作業が完了したら、作業ブランチをリモートにpushし、以下のghコマンドでPRを作成してください。
 PRのタイトルはIssue内容に基づいて簡潔に記述し、bodyには実施内容のサマリーを記載してください。
-PRは必ずdraft状態で作成してください（--draft フラグを使用）。
-PRのマージ先（ベースブランチ）は ${BASE_BRANCH} を指定してください（--base ${BASE_BRANCH}）。
+\`\`\`
+gh pr create --repo ${GITHUB_REPO} --draft --base ${BASE_BRANCH} --title \"<タイトル>\" --body \"<PR body>\"
+\`\`\`
 
 ${PR_BODY_FORMAT_GITHUB}
 

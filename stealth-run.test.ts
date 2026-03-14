@@ -435,7 +435,7 @@ describe('stealth-run.sh', () => {
         expect(mainContent).toContain('REVIEW_FIX_MODE');
         // レビュー指摘修正の指示が含まれる
         expect(content).toContain('レビュー指摘の修正担当');
-        expect(content).toContain('レビューコメントを取得');
+        expect(content).toContain('レビューコメントを全量取得');
         // 既存PRへのpush指示（新規PR作成しない）
         expect(content).toContain(
             '新しいPRは作成しないでください。既存のブランチへのpushで自動的にPRが更新されます',
