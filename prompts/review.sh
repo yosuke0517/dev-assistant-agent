@@ -26,14 +26,23 @@ if [ -n "$GITHUB_REPO" ]; then
 ${USER_REQUEST_SECTION}
 ## 手順
 
-STEP1: GitHub MCPを使用して ${GITHUB_REPO} リポジトリの Issue #${ISSUE_ID} の内容を取得してください。これがレビューの基準となる「仕様」です。
+STEP1: 以下のghコマンドで ${GITHUB_REPO} リポジトリの Issue #${ISSUE_ID} の内容を取得してください。これがレビューの基準となる「仕様」です。
+\`\`\`
+gh issue view ${ISSUE_ID} --repo ${GITHUB_REPO}
+\`\`\`
 
-STEP2: Issue #${ISSUE_ID} に関連するPRを見つけてください。以下の方法で探してください：
-- GitHub MCPでオープン中のPR一覧を取得し、タイトルやbodyに #${ISSUE_ID} への参照があるものを探す
-- feat/issue-${ISSUE_ID} または fix/issue-${ISSUE_ID} ブランチのPRを探す
+STEP2: Issue #${ISSUE_ID} に関連するPRを見つけてください。以下のghコマンドで探してください：
+\`\`\`
+gh pr list --repo ${GITHUB_REPO} --state open --search \"issue-${ISSUE_ID}\" --json number,title,headRefName,body
+\`\`\`
+上記で見つからない場合は、feat/issue-${ISSUE_ID} または fix/issue-${ISSUE_ID} ブランチ名でも検索してください。
 PRが見つからない場合は、その旨を報告して終了してください。
 
-STEP3: 見つけたPRの変更内容（diff）を取得してください。GitHub MCPの get_pull_request_files を使用してください。
+STEP3: 見つけたPRの変更内容（diff）を取得してください。以下のghコマンドを使用してください：
+\`\`\`
+gh pr diff <PR番号> --repo ${GITHUB_REPO}
+\`\`\`
+※ GitHub MCPの get_pull_request_files ではなく、gh pr diff を使用してください。ghコマンドの方が差分を全量取得できます。
 
 STEP4: Issue仕様とPRの変更内容を比較し、以下の観点でレビューしてください：
 
@@ -41,7 +50,10 @@ ${REVIEW_CRITERIA}
 
 ${REVIEW_RESULT}
 
-STEP6: レビュー結果をPRにコメントとして投稿してください。GitHub MCPの add_issue_comment を使用し、PR番号を指定してください。
+STEP6: レビュー結果をPRにコメントとして投稿してください。以下のghコマンドを使用し、PR番号を指定してください：
+\`\`\`
+gh pr comment <PR番号> --repo ${GITHUB_REPO} --body \"<レビュー結果>\"
+\`\`\`
 
 STEP7: ${REVIEW_SLACK_REPORT}
 
