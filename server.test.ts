@@ -2447,7 +2447,7 @@ describe('LoginHandler', () => {
         expect(result).toBe(false);
     });
 
-    it('ログインページが表示されユーザーがemail認証を選択した場合のフロー', async () => {
+    it('ログインページが表示されメール認証でログインするフロー', async () => {
         let waitReplyCallCount = 0;
         const mockPost = vi.fn().mockResolvedValue('msg-ts-1');
         const mockWaitReply = vi.fn().mockImplementation(async () => {
@@ -2456,10 +2456,8 @@ describe('LoginHandler', () => {
                 case 1:
                     return { text: 'はい', user: 'U123' }; // /login実行確認
                 case 2:
-                    return { text: 'email', user: 'U123' }; // 認証方法選択
-                case 3:
                     return { text: 'test@example.com', user: 'U123' }; // メールアドレス
-                case 4:
+                case 3:
                     return { text: '123456', user: 'U123' }; // 確認コード
                 default:
                     return null;
