@@ -1339,50 +1339,19 @@ export class LoginHandler {
                 return await this._verifyAuth();
             }
 
-            // 手動ログインが必要
+            // 手動ログインが必要（メール認証のみサポート）
+            // セキュリティ上の理由から、パスワードや2FAコードのSlack経由受け渡しが
+            // 必要なGoogle認証は廃止し、OTPベースのメール認証のみを使用する
             await this._post(
                 this.channel,
-                '🔐 *ログインページが表示されました*\n認証方法を選んでください:\n• `google` → Google認証\n• `email` → メール認証',
+                '🔐 *ログインページが表示されました*\nメール認証でログインを行います...',
                 this.threadTs,
             );
 
-            const methodTs = await this._post(
-                this.channel,
-                '_2分以内に返信してください_',
-                this.threadTs,
+            const loginSuccess = await this._handleEmailLogin(
+                playwrightClient,
+                pageContent,
             );
-            if (!methodTs) return false;
-
-            const methodReply = await this._waitReply(
-                this.channel,
-                this.threadTs,
-                methodTs,
-                { timeoutMs: 120_000 },
-            );
-
-            if (!methodReply) {
-                await this._post(
-                    this.channel,
-                    '❌ タイムアウトしました。サーバー上で手動で `claude auth login` を実行してください。',
-                    this.threadTs,
-                );
-                return false;
-            }
-
-            const method = methodReply.text.trim().toLowerCase();
-            let loginSuccess = false;
-
-            if (method.includes('google')) {
-                loginSuccess = await this._handleGoogleLogin(
-                    playwrightClient,
-                    pageContent,
-                );
-            } else {
-                loginSuccess = await this._handleEmailLogin(
-                    playwrightClient,
-                    pageContent,
-                );
-            }
 
             if (loginSuccess) {
                 // コールバック完了を待つ
@@ -1436,135 +1405,6 @@ export class LoginHandler {
         );
         // ログインキーワードがない場合、認証済み（コールバックにリダイレクトされた）
         return !hasLoginKeyword;
-    }
-
-    /** Google認証フローをPlaywrightで処理 */
-    private async _handleGoogleLogin(
-        client: Client,
-        _pageContent: string,
-    ): Promise<boolean> {
-        try {
-            // Googleボタンをクリック
-            await client.callTool({
-                name: 'browser_click',
-                arguments: { element: 'Continue with Google' },
-            });
-
-            await this._sleep(3_000);
-
-            // Googleのログインページ
-            // メールアドレスを聞く
-            const emailTs = await this._post(
-                this.channel,
-                '🔐 Googleのログインページが開きました。\nGoogleアカウントのメールアドレスを入力してください:',
-                this.threadTs,
-            );
-            if (!emailTs) return false;
-
-            const emailReply = await this._waitReply(
-                this.channel,
-                this.threadTs,
-                emailTs,
-                { timeoutMs: 120_000 },
-            );
-            if (!emailReply) return false;
-
-            await client.callTool({
-                name: 'browser_fill_form',
-                arguments: {
-                    values: [{ ref: 'email', value: emailReply.text.trim() }],
-                },
-            });
-
-            // 次へボタン
-            await client.callTool({
-                name: 'browser_click',
-                arguments: { element: 'Next' },
-            });
-
-            await this._sleep(3_000);
-
-            // パスワード
-            const pwTs = await this._post(
-                this.channel,
-                '🔐 パスワードを入力してください:',
-                this.threadTs,
-            );
-            if (!pwTs) return false;
-
-            const pwReply = await this._waitReply(
-                this.channel,
-                this.threadTs,
-                pwTs,
-                { timeoutMs: 120_000 },
-            );
-            if (!pwReply) return false;
-
-            await client.callTool({
-                name: 'browser_fill_form',
-                arguments: {
-                    values: [{ ref: 'password', value: pwReply.text.trim() }],
-                },
-            });
-
-            await client.callTool({
-                name: 'browser_click',
-                arguments: { element: 'Next' },
-            });
-
-            // 2FAが必要な場合はスナップショットで確認
-            await this._sleep(5_000);
-            const snapshot = await client.callTool({
-                name: 'browser_snapshot',
-                arguments: {},
-            });
-            const content =
-                (snapshot.content as Array<{ text?: string }>)?.[0]?.text || '';
-
-            if (
-                content.toLowerCase().includes('2-step') ||
-                content.toLowerCase().includes('verification')
-            ) {
-                const codeTs = await this._post(
-                    this.channel,
-                    '🔐 2段階認証のコードを入力してください:',
-                    this.threadTs,
-                );
-                if (!codeTs) return false;
-
-                const codeReply = await this._waitReply(
-                    this.channel,
-                    this.threadTs,
-                    codeTs,
-                    { timeoutMs: 120_000 },
-                );
-                if (!codeReply) return false;
-
-                await client.callTool({
-                    name: 'browser_fill_form',
-                    arguments: {
-                        values: [{ ref: 'code', value: codeReply.text.trim() }],
-                    },
-                });
-
-                await client.callTool({
-                    name: 'browser_click',
-                    arguments: { element: 'Next' },
-                });
-
-                await this._sleep(5_000);
-            }
-
-            return true;
-        } catch (error) {
-            console.error(`${timestamp()} 🔐 Google認証エラー:`, error);
-            await this._post(
-                this.channel,
-                `⚠️ Google認証中にエラーが発生しました: ${(error as Error).message}`,
-                this.threadTs,
-            );
-            return false;
-        }
     }
 
     /** メール認証フローをPlaywrightで処理 */
