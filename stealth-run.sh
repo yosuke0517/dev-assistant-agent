@@ -403,7 +403,9 @@ git config user.email "$GIT_USER_EMAIL"
 
 # 9. エージェントによる実装実行（モード別プロンプトファイルをsource）
 PROMPTS_DIR="$SCRIPT_DIR/prompts"
-if [ -n "$REVIEW_MODE" ]; then
+if [ -n "$RESEARCH_MODE" ]; then
+    source "$PROMPTS_DIR/research.sh"
+elif [ -n "$REVIEW_MODE" ]; then
     source "$PROMPTS_DIR/review.sh"
 elif [ -n "$REVIEW_FIX_MODE" ]; then
     source "$PROMPTS_DIR/review-fix.sh"
@@ -418,7 +420,7 @@ else
 fi
 
 # ユーザーからの追加指示がある場合はプロンプトに付与（通常モードのみ）
-if [ -z "$FOLLOW_UP_MESSAGE" ] && [ -z "$REVIEW_MODE" ] && [ -z "$REVIEW_FIX_MODE" ] && [ -n "$EXTRA_PROMPT" ]; then
+if [ -z "$FOLLOW_UP_MESSAGE" ] && [ -z "$REVIEW_MODE" ] && [ -z "$REVIEW_FIX_MODE" ] && [ -z "$RESEARCH_MODE" ] && [ -n "$EXTRA_PROMPT" ]; then
     PROMPT="${PROMPT}
 
 【ユーザーからの追加指示】

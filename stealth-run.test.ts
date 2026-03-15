@@ -411,6 +411,7 @@ describe('stealth-run.sh', () => {
             'review-fix.sh',
             'implement.sh',
             'user-request.sh',
+            'research.sh',
         ];
         for (const mode of modes) {
             const content = fs.readFileSync(
@@ -459,6 +460,57 @@ describe('stealth-run.sh', () => {
         expect(content).toContain('Review fix branch (auto-detected)');
         expect(content).toContain(
             'Review fix mode requires an existing PR branch',
+        );
+    });
+
+    it('RESEARCH_MODE のプロンプトで USER_REQUEST が反映される', () => {
+        const fs = require('node:fs');
+        const researchContent = fs.readFileSync(
+            path.join(promptsDir, 'research.sh'),
+            'utf8',
+        );
+        // USER_REQUEST_SECTIONの条件分岐が存在する
+        expect(researchContent).toContain('USER_REQUEST_SECTION=""');
+        expect(researchContent).toContain('if [ -n "$USER_REQUEST" ]');
+        expect(researchContent).toContain('ユーザーからの補足指示');
+        // プロンプト内にUSER_REQUEST_SECTIONが展開される
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: shell variable reference, not JS template
+        expect(researchContent).toContain('${USER_REQUEST_SECTION}');
+    });
+
+    it('RESEARCH_MODE のプロンプトに調査指示が含まれる', () => {
+        const fs = require('node:fs');
+        const mainContent = fs.readFileSync(scriptPath, 'utf8');
+        const allContent = readAllPromptContent();
+        // RESEARCH_MODE の条件分岐（stealth-run.sh本体）
+        expect(mainContent).toContain('if [ -n "$RESEARCH_MODE" ]');
+        // 調査モードの指示が含まれる
+        expect(allContent).toContain(
+            'コードベースの調査・分析を行うリサーチャー',
+        );
+        expect(allContent).toContain(
+            'コードの変更やPRの作成は行わないでください',
+        );
+        expect(allContent).toContain(
+            'ブランチの作成やチェックアウトは行わないでください',
+        );
+    });
+
+    it('RESEARCH_MODE のプロンプトにSlackレポート出力指示が含まれる', () => {
+        const allContent = readAllPromptContent();
+        expect(allContent).toContain('調査レポート');
+        expect(allContent).toContain('調査対象');
+        expect(allContent).toContain('調査結果サマリー');
+        expect(allContent).toContain('推奨アクション');
+    });
+
+    it('RESEARCH_MODE でGitHubとBacklog両方のプロンプトが存在する', () => {
+        const allContent = readAllPromptContent();
+        expect(allContent).toContain(
+            'Claude Code starting research for GitHub Issue',
+        );
+        expect(allContent).toContain(
+            'Claude Code starting research for Backlog Issue',
         );
     });
 
