@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# PATHにローカルbinを追加（非インタラクティブシェル対応）
+export PATH="$HOME/.local/bin:$PATH"
+
 # .env読み込み
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 if [ -f "$SCRIPT_DIR/.env" ]; then
