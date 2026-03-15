@@ -1562,6 +1562,24 @@ describe('buildResultMessage', () => {
         const result = buildResultMessage(output, 'review');
         expect(result).toContain('PRの作成を確認できませんでした');
     });
+
+    it('調査モードでresultTextがある場合、レポートをそのまま返す', () => {
+        const output = [
+            '{"type":"system","session_id":"abc123"}',
+            '{"type":"result","subtype":"success","result":"🔬 *調査レポート*\\n\\n*調査対象:* Issue #112\\n\\n*調査結果サマリー:*\\n- モードにリサーチを追加する必要がある","cost_usd":0.05}',
+        ].join('\n');
+        const result = buildResultMessage(output, 'research');
+        expect(result).toContain('調査レポート');
+        expect(result).not.toContain('📝 実行結果');
+    });
+
+    it('調査モードでresultTextが3000文字を超える場合、切り詰める', () => {
+        const longText = 'c'.repeat(3500);
+        const output = `{"type":"result","subtype":"success","result":"${longText}","cost_usd":0.05}`;
+        const result = buildResultMessage(output, 'research');
+        expect(result.length).toBeLessThan(3500);
+        expect(result).toContain('...');
+    });
 });
 
 describe('FollowUpHandler', () => {
@@ -2248,6 +2266,38 @@ describe('parseModalValues', () => {
 
         const result: ModalValues = parseModalValues(stateValues);
         expect(result.reviewMode).toBe('review-fix');
+    });
+
+    it('調査モードが選択された場合reviewMode=researchを返す', () => {
+        const stateValues = {
+            repository: {
+                value: {
+                    type: 'multi_static_select',
+                    selected_options: [{ value: 'agent' }],
+                },
+            },
+            branch: {
+                value: { type: 'plain_text_input', value: '' },
+            },
+            pbi: {
+                value: { type: 'plain_text_input', value: '87' },
+            },
+            base_branch: {
+                value: { type: 'plain_text_input', value: null },
+            },
+            fix_description: {
+                value: { type: 'plain_text_input', value: null },
+            },
+            review_mode: {
+                value: {
+                    type: 'static_select',
+                    selected_option: { value: 'research' },
+                },
+            },
+        };
+
+        const result: ModalValues = parseModalValues(stateValues);
+        expect(result.reviewMode).toBe('research');
     });
 });
 

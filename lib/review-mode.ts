@@ -6,7 +6,7 @@
 /**
  * エージェントモードの型定義
  */
-export type AgentMode = 'implement' | 'review' | 'review-fix';
+export type AgentMode = 'implement' | 'review' | 'review-fix' | 'research';
 
 /**
  * /do モーダルのモード選択ブロックを生成する
@@ -49,6 +49,13 @@ export function buildReviewModeBlock(): Record<string, unknown> {
                     },
                     value: 'review-fix',
                 },
+                {
+                    text: {
+                        type: 'plain_text',
+                        text: '調査（リサーチ）',
+                    },
+                    value: 'research',
+                },
             ],
         },
         optional: true,
@@ -78,6 +85,12 @@ export function getReviewModeDisplay(mode: AgentMode): ReviewModeDisplay {
                 modeEmoji: '🔧',
                 modeText: 'レビューFB対応',
             };
+        case 'research':
+            return {
+                modeLabel: '調査（リサーチ）',
+                modeEmoji: '🔬',
+                modeText: '調査',
+            };
         default:
             return {
                 modeLabel: '実行',
@@ -103,7 +116,11 @@ export function parseReviewMode(
 ): AgentMode {
     const modeValue =
         stateValues.review_mode?.value?.selected_option?.value ?? 'implement';
-    if (modeValue === 'review' || modeValue === 'review-fix') {
+    if (
+        modeValue === 'review' ||
+        modeValue === 'review-fix' ||
+        modeValue === 'research'
+    ) {
         return modeValue;
     }
     return 'implement';

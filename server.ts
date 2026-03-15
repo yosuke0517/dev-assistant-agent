@@ -803,6 +803,9 @@ export function spawnWorker(
                 ...(reviewMode === 'review-fix' && {
                     REVIEW_FIX_MODE: 'true',
                 }),
+                ...(reviewMode === 'research' && {
+                    RESEARCH_MODE: 'true',
+                }),
             },
         });
 
@@ -890,10 +893,10 @@ export function buildResultMessage(
     output: string,
     reviewMode: AgentMode,
 ): string {
-    const isReviewMode = reviewMode === 'review';
+    const isReportMode = reviewMode === 'review' || reviewMode === 'research';
     const resultText = extractResultText(output);
 
-    if (isReviewMode && resultText) {
+    if (isReportMode && resultText) {
         const truncated =
             resultText.length > 3000
                 ? `${resultText.substring(0, 3000)}...`
