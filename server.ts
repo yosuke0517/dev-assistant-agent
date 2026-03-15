@@ -670,9 +670,9 @@ export class FollowUpHandler {
 
         const mention = formatMention();
         const prompt = [
-            `${mention}💡 *${issueLabel}* の対応が完了しました。追加の依頼があればこのスレッドに返信してください。`,
+            `${mention}💡 *${issueLabel}* の対応が完了しました。質問や追加の依頼があればこのスレッドに返信してください。`,
             '',
-            '• 修正や追加の依頼内容を自由に記述してください',
+            '• 質問や確認事項、修正・追加の依頼を自由に記述してください',
             '• `終了` または `end` → セッションを終了',
             '',
             `_${Math.floor(this.timeoutMs / 60_000)}分以内に返信がない場合は自動でセッションを終了します_`,
@@ -1752,11 +1752,11 @@ export async function startAgentTask(params: AgentTaskParams): Promise<void> {
 
             followUpCount++;
             console.log(
-                `${timestamp()} 📝 フォローアップ依頼 (${followUpCount}/${MAX_FOLLOW_UPS}): ${decision.message}`,
+                `${timestamp()} 📝 フォローアップ (${followUpCount}/${MAX_FOLLOW_UPS}): ${decision.message}`,
             );
             await postToSlack(
                 channelId,
-                `🔄 追加依頼を実行します (${followUpCount}回目)\n> ${decision.message}`,
+                `🔄 対応を開始します (${followUpCount}回目)\n> ${decision.message}`,
                 parentTs,
             );
 
@@ -1784,7 +1784,7 @@ export async function startAgentTask(params: AgentTaskParams): Promise<void> {
             const mention = formatMention();
             await postToSlack(
                 channelId,
-                `${mention}${fuExitCode === 0 ? '✅' : '❌'} 追加依頼の対応が${fuExitCode === 0 ? '完了' : '終了'}しました (Exit Code: ${fuExitCode})`,
+                `${mention}${fuExitCode === 0 ? '✅' : '❌'} 対応が${fuExitCode === 0 ? '完了' : '終了'}しました (Exit Code: ${fuExitCode})`,
                 parentTs,
             );
 
