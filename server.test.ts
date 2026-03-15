@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
     buildDoModalView,
+    buildRepoOptions,
     buildResultMessage,
     type createPlaywrightClient,
     extractErrorSummary,
@@ -1759,7 +1760,69 @@ describe('FollowUpHandler', () => {
     });
 });
 
+describe('buildRepoOptions', () => {
+    let originalTargetRepos: string | undefined;
+
+    beforeEach(() => {
+        originalTargetRepos = process.env.TARGET_REPOSITORIES;
+    });
+
+    afterEach(() => {
+        if (originalTargetRepos !== undefined) {
+            process.env.TARGET_REPOSITORIES = originalTargetRepos;
+        } else {
+            delete process.env.TARGET_REPOSITORIES;
+        }
+    });
+
+    it('TARGET_REPOSITORIES未設定の場合はエラーをスローする', () => {
+        delete process.env.TARGET_REPOSITORIES;
+        expect(() => buildRepoOptions()).toThrow(
+            'TARGET_REPOSITORIES 環境変数が設定されていません',
+        );
+    });
+
+    it('カンマ区切りのリポジトリ名からオプション配列を生成する', () => {
+        process.env.TARGET_REPOSITORIES = 'repo_a,repo_b,repo_c';
+        const options = buildRepoOptions();
+        expect(options).toEqual([
+            { text: { type: 'plain_text', text: 'repo_a' }, value: 'repo_a' },
+            { text: { type: 'plain_text', text: 'repo_b' }, value: 'repo_b' },
+            { text: { type: 'plain_text', text: 'repo_c' }, value: 'repo_c' },
+        ]);
+    });
+
+    it('前後のスペースをトリムする', () => {
+        process.env.TARGET_REPOSITORIES = ' repo_a , repo_b ';
+        const options = buildRepoOptions();
+        expect(options).toHaveLength(2);
+        expect(options[0].value).toBe('repo_a');
+        expect(options[1].value).toBe('repo_b');
+    });
+
+    it('空文字列のエントリを除外する', () => {
+        process.env.TARGET_REPOSITORIES = 'repo_a,,repo_b,';
+        const options = buildRepoOptions();
+        expect(options).toHaveLength(2);
+    });
+});
+
 describe('buildDoModalView', () => {
+    let originalTargetRepos: string | undefined;
+
+    beforeEach(() => {
+        originalTargetRepos = process.env.TARGET_REPOSITORIES;
+        process.env.TARGET_REPOSITORIES = 'agent,jjp,backend,frontend';
+    });
+
+    afterEach(() => {
+        if (originalTargetRepos !== undefined) {
+            process.env.TARGET_REPOSITORIES = originalTargetRepos;
+        } else {
+            delete process.env.TARGET_REPOSITORIES;
+        }
+    });
+
     it('正しいcallback_idとtitleを持つモーダルを生成する', () => {
         const view = buildDoModalView('C123456');
         expect(view.type).toBe('modal');
@@ -1792,14 +1855,14 @@ describe('buildDoModalView', () => {
         expect(blocks[4].block_id).toBe('review_mode');
     });
 
-    it('repositoryブロックに6つのオプションがある', () => {
+    it('repositoryブロックにTARGET_REPOSITORIESの数だけオプションがある', () => {
         const view = buildDoModalView('C123456');
         const blocks = view.blocks as Array<{
             block_id: string;
             element: { options: unknown[] };
         }>;
         const repoBlock = blocks[0];
-        expect(repoBlock.element.options).toHaveLength(6);
+        expect(repoBlock.element.options).toHaveLength(4);
     });
 
     it('repositoryブロックがmulti_static_selectタイプである', () => {
@@ -1854,7 +1917,9 @@ describe('openModal', () => {
 
     it('views.open API成功時はtrueを返す', async () => {
         const originalToken = process.env.SLACK_BOT_TOKEN;
+        const originalRepos = process.env.TARGET_REPOSITORIES;
         process.env.SLACK_BOT_TOKEN = 'xoxb-test-token';
+        process.env.TARGET_REPOSITORIES = 'repo-a,repo-b';
 
         const mockFetch = vi.fn().mockResolvedValue({
             json: vi.fn().mockResolvedValue({ ok: true }),
@@ -1873,11 +1938,18 @@ describe('openModal', () => {
         expect(body.view.callback_id).toBe('do_modal');
 
         process.env.SLACK_BOT_TOKEN = originalToken;
+        if (originalRepos !== undefined) {
+            process.env.TARGET_REPOSITORIES = originalRepos;
+        } else {
+            delete process.env.TARGET_REPOSITORIES;
+        }
     });
 
     it('views.open APIエラー時はfalseを返す', async () => {
         const originalToken = process.env.SLACK_BOT_TOKEN;
+        const originalRepos = process.env.TARGET_REPOSITORIES;
         process.env.SLACK_BOT_TOKEN = 'xoxb-test-token';
+        process.env.TARGET_REPOSITORIES = 'repo-a,repo-b';
         const consoleSpy = vi
             .spyOn(console, 'error')
             .mockImplementation(() => {});
@@ -1898,11 +1970,18 @@ describe('openModal', () => {
 
         consoleSpy.mockRestore();
         process.env.SLACK_BOT_TOKEN = originalToken;
+        if (originalRepos !== undefined) {
+            process.env.TARGET_REPOSITORIES = originalRepos;
+        } else {
+            delete process.env.TARGET_REPOSITORIES;
+        }
     });
 
     it('ネットワークエラー時はfalseを返す', async () => {
         const originalToken = process.env.SLACK_BOT_TOKEN;
+        const originalRepos = process.env.TARGET_REPOSITORIES;
         process.env.SLACK_BOT_TOKEN = 'xoxb-test-token';
+        process.env.TARGET_REPOSITORIES = 'repo-a,repo-b';
         const consoleSpy = vi
             .spyOn(console, 'error')
             .mockImplementation(() => {});
@@ -1919,6 +1998,11 @@ describe('openModal', () => {
 
         consoleSpy.mockRestore();
         process.env.SLACK_BOT_TOKEN = originalToken;
+        if (originalRepos !== undefined) {
+            process.env.TARGET_REPOSITORIES = originalRepos;
+        } else {
+            delete process.env.TARGET_REPOSITORIES;
+        }
     });
 });
 

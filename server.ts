@@ -163,6 +163,30 @@ export function parseInput(rawText: string): ParsedInput {
  * /do コマンドのモーダルビュー定義を構築する
  * private_metadata にチャンネルIDを含めて、Submitハンドラで取得できるようにする
  */
+/**
+ * TARGET_REPOSITORIES 環境変数からリポジトリ選択肢を生成する
+ * 形式: "repo1,repo2,repo3"
+ */
+export function buildRepoOptions(): Array<{
+    text: { type: 'plain_text'; text: string };
+    value: string;
+}> {
+    const envValue = process.env.TARGET_REPOSITORIES;
+    if (!envValue) {
+        throw new Error(
+            'TARGET_REPOSITORIES 環境変数が設定されていません。カンマ区切りでリポジトリ名を指定してください。',
+        );
+    }
+    return envValue
+        .split(',')
+        .map((name) => name.trim())
+        .filter((name) => name.length > 0)
+        .map((name) => ({
+            text: { type: 'plain_text' as const, text: name },
+            value: name,
+        }));
+}
+
 export function buildDoModalView(channelId: string): Record<string, unknown> {
     return {
         type: 'modal',
@@ -186,44 +210,7 @@ export function buildDoModalView(channelId: string): Record<string, unknown> {
                         type: 'plain_text',
                         text: 'リポジトリを選択',
                     },
-                    options: [
-                        {
-                            text: { type: 'plain_text', text: 'agent' },
-                            value: 'agent',
-                        },
-                        {
-                            text: { type: 'plain_text', text: 'jjp' },
-                            value: 'jjp',
-                        },
-                        {
-                            text: {
-                                type: 'plain_text',
-                                text: 'circus_backend',
-                            },
-                            value: 'circus_backend',
-                        },
-                        {
-                            text: {
-                                type: 'plain_text',
-                                text: 'circus_frontend',
-                            },
-                            value: 'circus_frontend',
-                        },
-                        {
-                            text: {
-                                type: 'plain_text',
-                                text: 'circus_agent_ecosystem',
-                            },
-                            value: 'circus_agent_ecosystem',
-                        },
-                        {
-                            text: {
-                                type: 'plain_text',
-                                text: 'circus_backend_v2',
-                            },
-                            value: 'circus_backend_v2',
-                        },
-                    ],
+                    options: buildRepoOptions(),
                 },
             },
             {
