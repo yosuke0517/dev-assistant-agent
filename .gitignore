@@ -2,6 +2,21 @@ node_modules/
 dist/
 build/
 .env
+.env.*
+.env.local
+.env.production
+.env.development
+
+# 秘密鍵・証明書
+*.key
+*.pem
+*.p12
+*.pfx
+
+# クレデンシャル
+credentials.json
+service-account.json
+
 .DS_Store
 *.log
 .idea/
