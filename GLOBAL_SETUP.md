@@ -14,7 +14,7 @@
 
 ## 2. Cloudflare Tunnel 作成
 1. **ログイン**: `cloudflared tunnel login`。
-2. **作成**: `cloudflared tunnel create agent` (ID: `f1c9ec3d-8f73-4203-853f-adda0664db34`)。
+2. **作成**: `cloudflared tunnel create agent` (ID: `<YOUR_TUNNEL_ID>`)。
 3. **DNS紐付け**: `cloudflared tunnel route dns agent agent.finegate.xyz`。
 
 ## 3. Slack App 連携
