@@ -3,8 +3,8 @@
 ## 1. 設定ファイルの配置
 ### Cloudflare Config (~/.cloudflared/config.yml)
 --------------------------------------------------
-tunnel: f1c9ec3d-8f73-4203-853f-adda0664db34
-credentials-file: /Users/takeuchiyosuke/.cloudflared/f1c9ec3d-8f73-4203-853f-adda0664db34.json
+tunnel: <YOUR_TUNNEL_ID>
+credentials-file: /Users/<YOUR_USERNAME>/.cloudflared/<YOUR_TUNNEL_ID>.json
 
 ingress:
   - hostname: agent.finegate.xyz
