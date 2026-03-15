@@ -28,9 +28,11 @@ import {
     type WaitForSlackReplyOptions,
     waitForSlackReply,
 } from './lib/slack.js';
+import { captureRawBody, verifySlackSignature } from './lib/slack-signature.js';
 
 export { formatMention, postToSlack, waitForSlackReply };
 export { buildReviewModeBlock, getReviewModeDisplay, parseReviewMode };
+export { captureRawBody, verifySlackSignature };
 export type {
     AgentMode,
     FetchFn,
@@ -63,8 +65,8 @@ export function getRepoConfig(folder: string): RepoConfig {
 type PostFn = typeof postToSlack;
 
 const app = express();
-app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
+app.use(express.urlencoded({ extended: true, verify: captureRawBody }));
+app.use(express.json({ verify: captureRawBody }));
 
 export interface RelatedRepo {
     name: string;
@@ -1975,7 +1977,7 @@ export async function startAgentTask(params: AgentTaskParams): Promise<void> {
  * /do スラッシュコマンドハンドラー
  * モーダルを開いてユーザー入力を受け付ける
  */
-app.post('/do', async (req: Request, res: Response) => {
+app.post('/do', verifySlackSignature(), async (req: Request, res: Response) => {
     const triggerId = req.body.trigger_id;
     const channelId = req.body.channel_id;
 
@@ -2000,86 +2002,90 @@ app.post('/do', async (req: Request, res: Response) => {
  * Slack Interactivity エンドポイント
  * モーダルのSubmit（view_submission）を受け取り、エージェントタスクを開始する
  */
-app.post('/slack/interactions', async (req: Request, res: Response) => {
-    let payload: {
-        type: string;
-        view?: {
-            callback_id?: string;
-            private_metadata?: string;
-            state?: { values: SlackViewStateValues };
+app.post(
+    '/slack/interactions',
+    verifySlackSignature(),
+    async (req: Request, res: Response) => {
+        let payload: {
+            type: string;
+            view?: {
+                callback_id?: string;
+                private_metadata?: string;
+                state?: { values: SlackViewStateValues };
+            };
         };
-    };
 
-    try {
-        payload = JSON.parse(req.body.payload);
-    } catch {
-        res.status(400).send('Invalid payload');
-        return;
-    }
+        try {
+            payload = JSON.parse(req.body.payload);
+        } catch {
+            res.status(400).send('Invalid payload');
+            return;
+        }
 
-    if (
-        payload.type !== 'view_submission' ||
-        payload.view?.callback_id !== 'do_modal'
-    ) {
-        // 未知のインタラクションタイプはackだけして無視
+        if (
+            payload.type !== 'view_submission' ||
+            payload.view?.callback_id !== 'do_modal'
+        ) {
+            // 未知のインタラクションタイプはackだけして無視
+            res.send('');
+            return;
+        }
+
+        // モーダル送信を受信 → 即座にack（モーダルを閉じる）
         res.send('');
-        return;
-    }
 
-    // モーダル送信を受信 → 即座にack（モーダルを閉じる）
-    res.send('');
+        const stateValues = payload.view.state?.values;
+        if (!stateValues) return;
 
-    const stateValues = payload.view.state?.values;
-    if (!stateValues) return;
+        const {
+            folders,
+            branchName,
+            issueId,
+            baseBranch,
+            userRequest,
+            reviewMode,
+        } = parseModalValues(stateValues);
 
-    const {
-        folders,
-        branchName,
-        issueId,
-        baseBranch,
-        userRequest,
-        reviewMode,
-    } = parseModalValues(stateValues);
+        let channelId: string;
+        try {
+            const metadata = JSON.parse(payload.view.private_metadata || '{}');
+            channelId = metadata.channel_id;
+        } catch {
+            console.error('private_metadata のパースに失敗');
+            return;
+        }
 
-    let channelId: string;
-    try {
-        const metadata = JSON.parse(payload.view.private_metadata || '{}');
-        channelId = metadata.channel_id;
-    } catch {
-        console.error('private_metadata のパースに失敗');
-        return;
-    }
+        const primaryFolder = folders[0] ?? '';
+        if (!channelId || !primaryFolder || !issueId) {
+            console.error('必須フィールドが不足:', {
+                channelId,
+                folder: primaryFolder,
+                issueId,
+            });
+            return;
+        }
 
-    const primaryFolder = folders[0] ?? '';
-    if (!channelId || !primaryFolder || !issueId) {
-        console.error('必須フィールドが不足:', {
-            channelId,
+        // 2つ目以降のリポジトリは関連リポジトリとして扱う
+        const relatedRepos: RelatedRepo[] = folders.slice(1).map((name) => ({
+            name,
+        }));
+
+        const rawCommand = `${folders.join(', ')} ${issueId}${baseBranch ? ` ${baseBranch}` : ''}`;
+
+        // エージェントタスクを非同期で開始
+        startAgentTask({
             folder: primaryFolder,
             issueId,
+            baseBranch,
+            userRequest,
+            branchName: branchName || undefined,
+            relatedRepos,
+            channelId,
+            rawCommand,
+            reviewMode,
         });
-        return;
-    }
-
-    // 2つ目以降のリポジトリは関連リポジトリとして扱う
-    const relatedRepos: RelatedRepo[] = folders.slice(1).map((name) => ({
-        name,
-    }));
-
-    const rawCommand = `${folders.join(', ')} ${issueId}${baseBranch ? ` ${baseBranch}` : ''}`;
-
-    // エージェントタスクを非同期で開始
-    startAgentTask({
-        folder: primaryFolder,
-        issueId,
-        baseBranch,
-        userRequest,
-        branchName: branchName || undefined,
-        relatedRepos,
-        channelId,
-        rawCommand,
-        reviewMode,
-    });
-});
+    },
+);
 
 const PORT = 8787;
 app.listen(PORT, () => {
