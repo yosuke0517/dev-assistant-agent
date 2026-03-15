@@ -1917,7 +1917,9 @@ describe('openModal', () => {
 
     it('views.open API成功時はtrueを返す', async () => {
         const originalToken = process.env.SLACK_BOT_TOKEN;
+        const originalRepos = process.env.TARGET_REPOSITORIES;
         process.env.SLACK_BOT_TOKEN = 'xoxb-test-token';
+        process.env.TARGET_REPOSITORIES = 'repo-a,repo-b';
 
         const mockFetch = vi.fn().mockResolvedValue({
             json: vi.fn().mockResolvedValue({ ok: true }),
@@ -1936,11 +1938,18 @@ describe('openModal', () => {
         expect(body.view.callback_id).toBe('do_modal');
 
         process.env.SLACK_BOT_TOKEN = originalToken;
+        if (originalRepos !== undefined) {
+            process.env.TARGET_REPOSITORIES = originalRepos;
+        } else {
+            delete process.env.TARGET_REPOSITORIES;
+        }
     });
 
     it('views.open APIエラー時はfalseを返す', async () => {
         const originalToken = process.env.SLACK_BOT_TOKEN;
+        const originalRepos = process.env.TARGET_REPOSITORIES;
         process.env.SLACK_BOT_TOKEN = 'xoxb-test-token';
+        process.env.TARGET_REPOSITORIES = 'repo-a,repo-b';
         const consoleSpy = vi
             .spyOn(console, 'error')
             .mockImplementation(() => {});
@@ -1961,11 +1970,18 @@ describe('openModal', () => {
 
         consoleSpy.mockRestore();
         process.env.SLACK_BOT_TOKEN = originalToken;
+        if (originalRepos !== undefined) {
+            process.env.TARGET_REPOSITORIES = originalRepos;
+        } else {
+            delete process.env.TARGET_REPOSITORIES;
+        }
     });
 
     it('ネットワークエラー時はfalseを返す', async () => {
         const originalToken = process.env.SLACK_BOT_TOKEN;
+        const originalRepos = process.env.TARGET_REPOSITORIES;
         process.env.SLACK_BOT_TOKEN = 'xoxb-test-token';
+        process.env.TARGET_REPOSITORIES = 'repo-a,repo-b';
         const consoleSpy = vi
             .spyOn(console, 'error')
             .mockImplementation(() => {});
@@ -1982,6 +1998,11 @@ describe('openModal', () => {
 
         consoleSpy.mockRestore();
         process.env.SLACK_BOT_TOKEN = originalToken;
+        if (originalRepos !== undefined) {
+            process.env.TARGET_REPOSITORIES = originalRepos;
+        } else {
+            delete process.env.TARGET_REPOSITORIES;
+        }
     });
 });
 
